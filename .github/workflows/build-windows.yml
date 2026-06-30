@@ -1,0 +1,35 @@
+name: Build Windows app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-windows:
+    name: Build Zelka Scribe.exe
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build Windows app
+        shell: pwsh
+        run: .\build_windows.ps1
+
+      - name: Zip Windows app
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist\Zelka Scribe" -DestinationPath "dist\ZelkaScribe-Windows.zip" -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZelkaScribe-Windows-app
+          path: dist\ZelkaScribe-Windows.zip
