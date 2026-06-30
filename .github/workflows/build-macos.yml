@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-macos:
-    name: Build InstaYaziyaCevir.app
+    name: Build Zelka Scribe.app
     runs-on: macos-latest
 
     steps:
@@ -25,16 +25,16 @@ jobs:
       - name: Zip app
         run: |
           cd dist
-          ditto -c -k --sequesterRsrc --keepParent InstaYaziyaCevir.app InstaYaziyaCevir.app.zip
+          ditto -c -k --sequesterRsrc --keepParent "Zelka Scribe.app" ZelkaScribe.app.zip
 
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
         with:
-          name: InstaYaziyaCevir-macOS-app
-          path: dist/InstaYaziyaCevir.app.zip
+          name: ZelkaScribe-macOS-app
+          path: dist/ZelkaScribe.app.zip
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: InstaYaziyaCevir-macOS-dmg
-          path: dist/InstaYaziyaCevir.dmg
+          name: ZelkaScribe-macOS-dmg
+          path: dist/ZelkaScribe.dmg
