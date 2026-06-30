@@ -1,0 +1,5 @@
+yt-dlp>=2025.12.8
+faster-whisper>=1.1.1
+pyinstaller>=6.0
+certifi
+pycryptodomex

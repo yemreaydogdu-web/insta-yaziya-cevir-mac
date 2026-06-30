@@ -1,0 +1,12 @@
+MAC KULLANIYORSAN HEDEF DOSYA .EXE DEĞİL, .APP / .DMG'DİR.
+
+Bu zip kaynak projedir. Final uygulamayı üretmenin en kolay yolu:
+
+1) GitHub'da yeni repo aç.
+2) Bu klasördeki dosyaları repoya yükle.
+3) Actions sekmesine gir.
+4) Build macOS app > Run workflow de.
+5) Artifacts bölümünden InstaYaziyaCevir-macOS-dmg dosyasını indir.
+6) DMG'yi aç, uygulamayı Applications klasörüne sürükle.
+
+Uygulama imzasız olduğu için ilk açılışta sağ tık > Aç yapman gerekebilir.
