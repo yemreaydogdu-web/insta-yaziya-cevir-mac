@@ -1,8 +1,16 @@
 MAC KULLANIYORSAN HEDEF DOSYA .EXE DEĞİL, .APP / .DMG'DİR.
 
-Bu zip kaynak projedir. Final uygulamayı üretmenin en kolay yolu:
+Bu klasör v1.1 kaynak projedir.
 
-1) GitHub'da yeni repo aç.
+Bu sürümde:
+- Varsayılan model small oldu.
+- Model cache eklendi; aynı uygulama açıkken aynı model tekrar yüklenmez.
+- Video konusu / özel terimler alanı eklendi.
+- Modeli RAM'den temizle butonu eklendi.
+
+Final uygulamayı üretmenin en kolay yolu:
+
+1) GitHub'da mevcut repoya bu dosyaları yükle veya yeni repo aç.
 2) Bu klasördeki dosyaları repoya yükle.
 3) Actions sekmesine gir.
 4) Build macOS app > Run workflow de.

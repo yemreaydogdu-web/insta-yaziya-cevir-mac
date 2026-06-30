@@ -1,3 +1,5 @@
+import gc
+import inspect
 import os
 import queue
 import re
@@ -15,6 +17,7 @@ from faster_whisper import WhisperModel
 
 
 APP_NAME = "Insta Yazıya Çevir"
+APP_VERSION = "1.1.0"
 DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "InstaYaziyaCevir"
 
 
@@ -26,6 +29,7 @@ class JobOptions:
     model_size: str
     cookies_browser: str
     language: str
+    context_prompt: str
 
 
 def safe_filename(text: str, fallback: str = "video") -> str:
@@ -58,7 +62,8 @@ def write_txt(path: Path, segments: Iterable) -> None:
 
 def write_plain_txt(path: Path, segments: Iterable) -> None:
     text = " ".join(seg.text.strip() for seg in segments if seg.text.strip())
-    path.write_text(text.strip() + "\n", encoding="utf-8")
+    text = re.sub(r"\s+", " ", text).strip()
+    path.write_text(text + "\n", encoding="utf-8")
 
 
 def write_srt(path: Path, segments: Iterable) -> None:
@@ -71,6 +76,40 @@ def write_srt(path: Path, segments: Iterable) -> None:
             f"{index}\n{format_timestamp(seg.start, srt=True)} --> {format_timestamp(seg.end, srt=True)}\n{text}\n"
         )
     path.write_text("\n".join(blocks).strip() + "\n", encoding="utf-8")
+
+
+def build_initial_prompt(context_prompt: str, language: str) -> Optional[str]:
+    """Whisper'a konu/özel terim bağlamı verir.
+
+    Bu bir LLM düzeltmesi değildir; sadece transkripsiyon sırasında modelin
+    olası özel kelimeleri daha doğru seçmesine yardım eden güvenli bir ipucudur.
+    """
+    context_prompt = (context_prompt or "").strip()
+    if not context_prompt:
+        return None
+
+    if language == "tr":
+        return (
+            "Bu videoda geçen özel isimler, teknik terimler veya konu bağlamı şunlar olabilir: "
+            f"{context_prompt}. "
+            "Konuşmayı Türkçe olarak, duyulan anlama sadık kalarak yaz."
+        )
+
+    return (
+        "Possible topic context, proper nouns, and technical terms in this video: "
+        f"{context_prompt}. Transcribe faithfully without adding new meaning."
+    )
+
+
+def supported_transcribe_kwargs(model: WhisperModel, kwargs: dict) -> dict:
+    """faster-whisper sürüm farklarına dayanıklı parametre filtresi."""
+    try:
+        sig = inspect.signature(model.transcribe)
+    except Exception:
+        return kwargs
+
+    allowed = set(sig.parameters.keys())
+    return {key: value for key, value in kwargs.items() if key in allowed and value is not None}
 
 
 def download_instagram(url: str, output_dir: Path, cookies_browser: str, log) -> Path:
@@ -111,18 +150,20 @@ def download_instagram(url: str, output_dir: Path, cookies_browser: str, log) ->
 class InstaYaziyaCevirApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(APP_NAME)
-        self.geometry("880x720")
-        self.minsize(760, 620)
+        self.title(f"{APP_NAME} v{APP_VERSION}")
+        self.geometry("920x790")
+        self.minsize(780, 680)
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.worker: Optional[threading.Thread] = None
         self.selected_file = tk.StringVar(value="")
         self.url_var = tk.StringVar(value="")
         self.output_var = tk.StringVar(value=str(DEFAULT_OUTPUT_DIR))
-        self.model_var = tk.StringVar(value="base")
+        self.model_var = tk.StringVar(value="small")
         self.cookies_var = tk.StringVar(value="Yok")
         self.language_var = tk.StringVar(value="tr")
         self.status_var = tk.StringVar(value="Hazır")
+        self.cached_model: Optional[WhisperModel] = None
+        self.cached_model_size: Optional[str] = None
         self._build_ui()
         self.after(100, self._poll_log)
 
@@ -136,8 +177,11 @@ class InstaYaziyaCevirApp(tk.Tk):
 
         desc = ttk.Label(
             root,
-            text="Instagram linki yapıştır veya bilgisayardan video/ses dosyası seç. Çıktı olarak TXT ve SRT üretir.",
-            wraplength=820,
+            text=(
+                "Instagram linki yapıştır veya bilgisayardan video/ses dosyası seç. "
+                "v1.1: small varsayılan, model cache ve konu/özel terim alanı eklendi."
+            ),
+            wraplength=860,
         )
         desc.pack(anchor="w", pady=(4, 16))
 
@@ -151,6 +195,17 @@ class InstaYaziyaCevirApp(tk.Tk):
         ttk.Entry(file_frame, textvariable=self.selected_file).pack(side="left", fill="x", expand=True, padx=10, pady=10)
         ttk.Button(file_frame, text="Dosya seç", command=self.choose_file).pack(side="left", padx=(0, 10))
 
+        context_frame = ttk.LabelFrame(root, text="Opsiyonel: Video konusu / özel terimler")
+        context_frame.pack(fill="x", pady=(0, 10))
+        context_help = ttk.Label(
+            context_frame,
+            text="Örnek: retainer, şeffaf plak, braket / Gemini, Kling, prompt / TÜİK, faiz, enflasyon",
+            wraplength=860,
+        )
+        context_help.pack(anchor="w", padx=10, pady=(8, 0))
+        self.context_text = tk.Text(context_frame, wrap="word", height=3)
+        self.context_text.pack(fill="x", padx=10, pady=8)
+
         options = ttk.LabelFrame(root, text="2) Ayarlar")
         options.pack(fill="x", pady=(0, 10))
 
@@ -158,15 +213,33 @@ class InstaYaziyaCevirApp(tk.Tk):
         row.pack(fill="x", padx=10, pady=10)
 
         ttk.Label(row, text="Model:").grid(row=0, column=0, sticky="w")
-        model_box = ttk.Combobox(row, textvariable=self.model_var, values=["tiny", "base", "small", "medium", "large-v3"], width=12, state="readonly")
+        model_box = ttk.Combobox(
+            row,
+            textvariable=self.model_var,
+            values=["tiny", "base", "small", "medium", "large-v3"],
+            width=12,
+            state="readonly",
+        )
         model_box.grid(row=0, column=1, padx=(8, 24), sticky="w")
 
         ttk.Label(row, text="Dil:").grid(row=0, column=2, sticky="w")
-        lang_box = ttk.Combobox(row, textvariable=self.language_var, values=["tr", "auto", "en", "de", "fr", "es", "it", "ar"], width=10, state="readonly")
+        lang_box = ttk.Combobox(
+            row,
+            textvariable=self.language_var,
+            values=["tr", "auto", "en", "de", "fr", "es", "it", "ar"],
+            width=10,
+            state="readonly",
+        )
         lang_box.grid(row=0, column=3, padx=(8, 24), sticky="w")
 
         ttk.Label(row, text="Instagram çerezi:").grid(row=0, column=4, sticky="w")
-        cookies_box = ttk.Combobox(row, textvariable=self.cookies_var, values=["Yok", "Chrome", "Safari", "Firefox", "Edge"], width=12, state="readonly")
+        cookies_box = ttk.Combobox(
+            row,
+            textvariable=self.cookies_var,
+            values=["Yok", "Chrome", "Safari", "Firefox", "Edge"],
+            width=12,
+            state="readonly",
+        )
         cookies_box.grid(row=0, column=5, padx=(8, 0), sticky="w")
 
         out_frame = ttk.Frame(options)
@@ -180,6 +253,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.start_button = ttk.Button(buttons, text="Yazıya çevir", command=self.start_job)
         self.start_button.pack(side="left")
         ttk.Button(buttons, text="Çıktı klasörünü aç", command=self.open_output_dir).pack(side="left", padx=8)
+        ttk.Button(buttons, text="Modeli RAM'den temizle", command=self.unload_model).pack(side="left")
         ttk.Label(buttons, textvariable=self.status_var).pack(side="right")
 
         log_frame = ttk.LabelFrame(root, text="Durum")
@@ -191,7 +265,8 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.log_text.configure(yscrollcommand=scroll.set)
 
         self.log("Hazır. Instagram linki gir veya dosya seç.")
-        self.log("Not: İlk kullanımda seçilen Whisper modeli indirileceği için biraz bekleyebilir.")
+        self.log("Not: v1.1'de model aynı oturumda tekrar yüklenmez; aynı modelle ikinci video daha hızlı başlar.")
+        self.log("Not: Model ilk kez kullanılıyorsa indirme/yükleme biraz sürebilir.")
 
     def choose_file(self):
         path = filedialog.askopenfilename(
@@ -213,6 +288,16 @@ class InstaYaziyaCevirApp(tk.Tk):
         out = Path(self.output_var.get()).expanduser()
         out.mkdir(parents=True, exist_ok=True)
         os.system(f'open "{out}"')
+
+    def unload_model(self):
+        if self.worker and self.worker.is_alive():
+            messagebox.showinfo(APP_NAME, "İşlem devam ederken model temizlenemez.")
+            return
+        self.cached_model = None
+        self.cached_model_size = None
+        gc.collect()
+        self.log("Model RAM'den temizlendi.")
+        self.status_var.set("Hazır")
 
     def log(self, msg: str):
         self.log_queue.put(msg)
@@ -240,6 +325,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             model_size=self.model_var.get(),
             cookies_browser=self.cookies_var.get(),
             language=self.language_var.get(),
+            context_prompt=self.context_text.get("1.0", "end").strip(),
         )
 
         if not opts.instagram_url and not opts.local_file:
@@ -250,6 +336,19 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.status_var.set("Çalışıyor...")
         self.worker = threading.Thread(target=self.run_job, args=(opts,), daemon=True)
         self.worker.start()
+
+    def get_model(self, model_size: str) -> WhisperModel:
+        if self.cached_model is not None and self.cached_model_size == model_size:
+            self.log(f"Önceden yüklenmiş model kullanılıyor: {model_size}")
+            return self.cached_model
+
+        self.log(f"Model yükleniyor: {model_size}")
+        self.log("İlk kez kullanılıyorsa model indirilebilir; bu işlem biraz sürebilir.")
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        self.cached_model = model
+        self.cached_model_size = model_size
+        self.log(f"Model hazır: {model_size}")
+        return model
 
     def run_job(self, opts: JobOptions):
         try:
@@ -262,22 +361,32 @@ class InstaYaziyaCevirApp(tk.Tk):
                 media_path = download_instagram(opts.instagram_url, opts.output_dir, opts.cookies_browser, self.log)
                 self.log(f"İndirildi: {media_path}")
 
+            if not media_path.exists():
+                raise FileNotFoundError(f"Dosya bulunamadı: {media_path}")
+
             base_name = safe_filename(media_path.stem)
             txt_timed = opts.output_dir / f"{base_name}.zamanli.txt"
             txt_plain = opts.output_dir / f"{base_name}.duz_metin.txt"
             srt_path = opts.output_dir / f"{base_name}.srt"
 
-            self.log(f"Model yükleniyor: {opts.model_size}")
-            model = WhisperModel(opts.model_size, device="cpu", compute_type="int8")
+            model = self.get_model(opts.model_size)
 
             language = None if opts.language == "auto" else opts.language
+            initial_prompt = build_initial_prompt(opts.context_prompt, opts.language)
+            if initial_prompt:
+                self.log("Konu/özel terim bağlamı kullanılacak.")
+
             self.log("Yazıya çevirme başladı...")
-            segments_iter, info = model.transcribe(
-                str(media_path),
-                language=language,
-                vad_filter=True,
-                beam_size=5,
-            )
+            kwargs = {
+                "language": language,
+                "vad_filter": True,
+                "beam_size": 5,
+                "initial_prompt": initial_prompt,
+                "condition_on_previous_text": False,
+                "temperature": 0,
+            }
+            kwargs = supported_transcribe_kwargs(model, kwargs)
+            segments_iter, info = model.transcribe(str(media_path), **kwargs)
             segments = list(segments_iter)
 
             detected = getattr(info, "language", "?")

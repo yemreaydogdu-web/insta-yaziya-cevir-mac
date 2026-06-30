@@ -1,8 +1,17 @@
-# Insta Yazıya Çevir — macOS app projesi
+# Insta Yazıya Çevir — macOS app projesi v1.1
 
-Bu proje Instagram/Reels linkinden veya bilgisayardaki video/ses dosyasından Türkçe metin çıkarmak için basit bir macOS uygulaması üretir.
+Bu proje Instagram/Reels linkinden veya bilgisayardaki video/ses dosyasından metin çıkarmak için basit bir macOS uygulaması üretir.
 
-## Senin için en kolay hedef
+## v1.1'de gelen değişiklikler
+
+- Varsayılan model `small` yapıldı.
+- Model cache eklendi: Uygulama açık kaldığı sürece aynı model tekrar tekrar yüklenmez.
+- "Modeli RAM'den temizle" butonu eklendi.
+- "Video konusu / özel terimler" alanı eklendi. Örneğin: `retainer, şeffaf plak, braket` veya `Gemini, Kling, prompt`.
+- Transkripsiyonda konu/terim alanı `initial_prompt` olarak kullanılır.
+- Hallucination riskini azaltmak için desteklenen sürümlerde `condition_on_previous_text=False` ve `temperature=0` denenir.
+
+## En kolay kullanım
 
 Mac'te kurulabilir dosya olarak şunlardan biri üretilecek:
 
@@ -21,11 +30,11 @@ oluşturur.
 
 Bu klasör kaynak projedir. Final `.app` dosyası Mac üzerinde derlenmelidir. En temiz yöntem GitHub Actions kullanmaktır; bu sayede kendi Mac'ine Python/FFmpeg kurmadan `.app` ve `.dmg` çıktısı alırsın.
 
-Uygulama FFmpeg'i sistemden istemez; ses/video okuma tarafını `faster-whisper`/PyAV halleder. İlk kullanımda seçtiğin Whisper modeli indirileceği için biraz bekleyebilir.
+Uygulama FFmpeg'i sistemden istemez; ses/video okuma tarafını `faster-whisper`/PyAV halleder. İlk kullanımda seçtiğin Whisper modeli indirileceği için biraz bekleyebilir. Aynı uygulama oturumunda aynı model tekrar kullanılınca yeniden yüklenmez.
 
 ## GitHub Actions ile `.app` üretme
 
-1. GitHub'da yeni bir repo aç.
+1. GitHub'da mevcut repoya bu dosyaları yükle veya yeni repo aç.
 2. Bu zip'in içindeki tüm dosyaları repoya yükle.
 3. GitHub'da repo sayfasında **Actions** sekmesine gir.
 4. **Build macOS app** workflow'unu seç.
@@ -44,32 +53,23 @@ Uygulama imzalı/noter onaylı olmadığı için macOS ilk açılışta uyarı v
 2. **Open / Aç** de.
 3. Çıkan uyarıda tekrar **Open / Aç** de.
 
-## Mac'te kendin build almak istersen
-
-Mac'inde Python varsa:
-
-```bash
-bash build_macos.sh
-```
-
-Çıktılar:
-
-```text
-dist/InstaYaziyaCevir.app
-dist/InstaYaziyaCevir.dmg
-```
-
-## Kullanım
+## Kullanım önerisi
 
 1. Uygulamayı aç.
-2. Instagram linkini yapıştır.
-3. Gerekirse "Instagram çerezi" kısmından Chrome/Safari/Firefox seç.
-4. Model seç:
-   - `base`: hızlı ve yeterli
-   - `small`: daha iyi Türkçe sonuç, biraz daha yavaş
-   - `medium`: daha iyi ama ağır
-5. **Yazıya çevir** butonuna bas.
-6. Çıktı klasöründen `.txt` dosyasını al.
+2. Bilgisayardan kısa bir video seçerek test et.
+3. Modeli `small` bırak.
+4. Dil `tr` olsun.
+5. "Video konusu / özel terimler" alanına videoda geçebilecek özel kelimeleri yaz.
+6. **Yazıya çevir** butonuna bas.
+7. Aynı modelle ikinci video işlenirken model tekrar yüklenmez.
+
+## Model seçimi
+
+- `tiny`: çok hızlı, kalite düşük.
+- `base`: hızlı, Türkçe kalite bazı videolarda zayıf.
+- `small`: önerilen varsayılan denge.
+- `medium`: daha iyi olabilir ama yavaş.
+- `large-v3`: en ağır seçenek; Mac'te çok uzun sürebilir.
 
 ## Instagram linkleri bazen neden çalışmaz?
 
