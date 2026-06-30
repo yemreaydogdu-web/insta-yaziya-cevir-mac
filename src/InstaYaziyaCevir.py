@@ -10,7 +10,7 @@ import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Tuple
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -20,7 +20,7 @@ from faster_whisper import WhisperModel
 
 
 APP_NAME = "Insta Yazıya Çevir"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "InstaYaziyaCevir"
 
 
@@ -32,6 +32,7 @@ class JobOptions:
     model_size: str
     cookies_browser: str
     language: str
+    test_first_minute: bool
 
 
 def safe_filename(text: str, fallback: str = "video") -> str:
@@ -61,6 +62,13 @@ def format_elapsed(seconds: float) -> str:
     if h:
         return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
+
+
+def format_percent(value: float) -> str:
+    value = max(0.0, min(100.0, value))
+    if value >= 99.5:
+        return "100%"
+    return f"{value:.0f}%"
 
 
 def write_txt(path: Path, segments: Iterable) -> None:
@@ -129,6 +137,10 @@ class CleanSegment:
     start: float
     end: float
     text: str
+
+
+class UserCancelled(Exception):
+    pass
 
 
 SUSPICIOUS_ENDING_PATTERNS = [
@@ -250,7 +262,7 @@ def download_media(url: str, output_dir: Path, cookies_browser: str, log) -> Pat
         if "ffmpeg" in msg.lower():
             raise RuntimeError(
                 "Link indirilemedi çünkü indirme aracı ffmpeg isteyen bir format seçti. "
-                "Bu v1.4'te tek dosya/ses indirme ile azaltıldı; farklı bir link deneyebilir veya videoyu dosya olarak indirebilirsin."
+                "Bu sürümde tek dosya/ses indirme ile azaltıldı; farklı bir link deneyebilir veya videoyu dosya olarak indirebilirsin."
             ) from exc
         raise
 
@@ -277,11 +289,17 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.model_var = tk.StringVar(value="small")
         self.cookies_var = tk.StringVar(value="Yok")
         self.language_var = tk.StringVar(value="tr")
+        self.test_first_minute_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Hazır")
         self.stage_var = tk.StringVar(value="Aşama: Hazır")
         self.elapsed_var = tk.StringVar(value="Geçen süre: 00:00")
         self.loaded_model_var = tk.StringVar(value="Yüklü model: Yok")
-        self.model_hint_var = tk.StringVar(value="Small: hızlı taslak. Large-v3: kalite modu. Turbo: deneysel hızlı kalite. v1.4 link indirme ffmpeg gerektirmez.")
+        self.progress_detail_var = tk.StringVar(value="İlerleme: -")
+        self.eta_var = tk.StringVar(value="Tahmini kalan: -")
+        self.last_segment_var = tk.StringVar(value="Son metin: -")
+        self.progress_value = tk.DoubleVar(value=0.0)
+        self.cancel_requested = False
+        self.model_hint_var = tk.StringVar(value="Small: hızlı taslak. Large-v3: kalite modu. Turbo: deneysel hızlı kalite. v1.5 canlı ilerleme, iptal ve 1 dk test modu eklendi.")
         self.cached_model: Optional[WhisperModel] = None
         self.cached_model_size: Optional[str] = None
         self.activity_start_time: Optional[float] = None
@@ -302,7 +320,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             root,
             text=(
                 "Video linki yapıştır veya bilgisayardan video/ses dosyası seç. "
-                "v1.4: özel terim alanı kaldırıldı, linkten indirirken ffmpeg gerektirmeyen tek dosya/ses modu eklendi."
+                "v1.5: canlı yüzde/işlenen süre, iptal butonu ve ilk 1 dakika test modu eklendi."
             ),
             wraplength=900,
         )
@@ -359,6 +377,15 @@ class InstaYaziyaCevirApp(tk.Tk):
         hint = ttk.Label(options, textvariable=self.model_hint_var, wraplength=900)
         hint.pack(anchor="w", padx=10, pady=(0, 8))
 
+        test_row = ttk.Frame(options)
+        test_row.pack(fill="x", padx=10, pady=(0, 8))
+        ttk.Checkbutton(
+            test_row,
+            text="Sadece ilk 1 dakikayı test et",
+            variable=self.test_first_minute_var,
+        ).pack(side="left")
+        ttk.Label(test_row, text="Uzun linklerde hızlı deneme için kullan.").pack(side="left", padx=(10, 0))
+
         out_frame = ttk.Frame(options)
         out_frame.pack(fill="x", padx=10, pady=(0, 10))
         ttk.Label(out_frame, text="Çıktı klasörü:").pack(side="left")
@@ -371,14 +398,21 @@ class InstaYaziyaCevirApp(tk.Tk):
         top_status.pack(fill="x", padx=10, pady=(10, 6))
         ttk.Label(top_status, textvariable=self.stage_var).pack(side="left")
         ttk.Label(top_status, textvariable=self.elapsed_var).pack(side="right")
-        self.progress = ttk.Progressbar(progress_frame, mode="indeterminate")
-        self.progress.pack(fill="x", padx=10, pady=(0, 8))
+        self.progress = ttk.Progressbar(progress_frame, mode="determinate", maximum=100, variable=self.progress_value)
+        self.progress.pack(fill="x", padx=10, pady=(0, 6))
+        detail_row = ttk.Frame(progress_frame)
+        detail_row.pack(fill="x", padx=10, pady=(0, 4))
+        ttk.Label(detail_row, textvariable=self.progress_detail_var).pack(side="left")
+        ttk.Label(detail_row, textvariable=self.eta_var).pack(side="right")
+        ttk.Label(progress_frame, textvariable=self.last_segment_var, wraplength=900).pack(anchor="w", padx=10, pady=(0, 6))
         ttk.Label(progress_frame, textvariable=self.loaded_model_var).pack(anchor="w", padx=10, pady=(0, 10))
 
         buttons = ttk.Frame(root)
         buttons.pack(fill="x", pady=(0, 10))
         self.start_button = ttk.Button(buttons, text="Yazıya çevir", command=self.start_job)
         self.start_button.pack(side="left")
+        self.cancel_button = ttk.Button(buttons, text="İptal", command=self.cancel_job, state="disabled")
+        self.cancel_button.pack(side="left", padx=(8, 0))
         self.preload_button = ttk.Button(buttons, text="Seçili modeli hazırla", command=self.preload_selected_model)
         self.preload_button.pack(side="left", padx=(8, 0))
         ttk.Button(buttons, text="Çıktı klasörünü aç", command=self.open_output_dir).pack(side="left", padx=8)
@@ -396,14 +430,15 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.log("Hazır. Video linki gir veya dosya seç.")
         self.log("Not: Aynı oturumda aynı model tekrar yüklenmez; ikinci video daha hızlı başlar.")
         self.log("Not: large-v3 ve turbo ilk kullanımda indirilebilir/yüklenebilir; sayaçtan bekleme süresini takip edebilirsin.")
-        self.log("Not: v1.4 linkten indirirken ffmpeg merge istemez; YouTube/Instagram linklerini tek dosya/ses olarak dener.")
+        self.log("Not: v1.5 işlem sırasında işlenen süre/yüzde gösterir; uzun videoda ilk 1 dakika test modunu kullanabilirsin.")
+        self.log("Not: Linkten indirirken ffmpeg merge istemez; YouTube/Instagram linklerini tek dosya/ses olarak dener.")
 
     def on_model_changed(self, _event=None):
         model = self.model_var.get()
         if model == "large-v3":
             self.model_hint_var.set("Large-v3 ana kalite modudur. İlk kullanımda uzun sürebilir; ikinci kullanımda cache sayesinde hızlı başlar.")
         elif model == "turbo":
-            self.model_hint_var.set("Turbo deneysel hızlı kalite modudur. Kalite large-v3 kadar stabil olmayabilir; v1.4 güvenli bitiş filtresi açıktır.")
+            self.model_hint_var.set("Turbo deneysel hızlı kalite modudur. Kalite large-v3 kadar stabil olmayabilir; güvenli bitiş filtresi açıktır.")
         elif model == "medium":
             self.model_hint_var.set("Medium dengeli moddur ama testte large-v3 kadar iyi çıkmayabilir.")
         elif model == "small":
@@ -466,9 +501,14 @@ class InstaYaziyaCevirApp(tk.Tk):
     def _start_activity(self, stage: str):
         self.activity_start_time = time.monotonic()
         self.activity_running = True
+        self.cancel_requested = False
         self.stage_var.set(f"Aşama: {stage}")
         self.elapsed_var.set("Geçen süre: 00:00")
+        self.progress.configure(mode="indeterminate")
         self.progress.start(12)
+        self.progress_detail_var.set("İlerleme: hazırlanıyor")
+        self.eta_var.set("Tahmini kalan: -")
+        self.last_segment_var.set("Son metin: -")
 
     def _finish_activity(self, stage: str = "Tamamlandı"):
         self.activity_running = False
@@ -476,6 +516,18 @@ class InstaYaziyaCevirApp(tk.Tk):
             self.elapsed_var.set(f"Geçen süre: {format_elapsed(time.monotonic() - self.activity_start_time)}")
         self.stage_var.set(f"Aşama: {stage}")
         self.progress.stop()
+        self.progress.configure(mode="determinate")
+        if stage == "Tamamlandı":
+            self.progress_value.set(100)
+        elif stage == "İptal edildi":
+            self.progress_detail_var.set("İlerleme: işlem iptal edildi")
+            self.eta_var.set("Tahmini kalan: -")
+
+    def start_indeterminate_progress(self):
+        self.after(0, lambda: (self.progress.configure(mode="indeterminate"), self.progress.start(12)))
+
+    def start_determinate_progress(self):
+        self.after(0, lambda: (self.progress.stop(), self.progress.configure(mode="determinate"), self.progress_value.set(0)))
 
     def _update_elapsed(self):
         if self.activity_running and self.activity_start_time is not None:
@@ -497,6 +549,38 @@ class InstaYaziyaCevirApp(tk.Tk):
         state = "disabled" if busy else "normal"
         self.start_button.configure(state=state)
         self.preload_button.configure(state=state)
+        self.cancel_button.configure(state="normal" if busy else "disabled")
+
+    def cancel_job(self):
+        if not self.is_busy():
+            return
+        self.cancel_requested = True
+        self.log("İptal istendi. Mevcut segment tamamlanınca işlem duracak.")
+        self.set_status("İptal ediliyor...")
+        self.set_stage("İptal ediliyor")
+
+    def set_transcribe_progress(self, processed: float, total: Optional[float], last_text: str = ""):
+        def _apply():
+            if total and total > 0:
+                percent = max(0.0, min(100.0, (processed / total) * 100.0))
+                self.progress_value.set(percent)
+                self.progress_detail_var.set(
+                    f"İşlenen: {format_elapsed(processed)} / {format_elapsed(total)} ({format_percent(percent)})"
+                )
+                if self.activity_start_time and processed > 1:
+                    elapsed = time.monotonic() - self.activity_start_time
+                    remaining = max(0.0, elapsed * (total - processed) / max(processed, 1.0))
+                    self.eta_var.set(f"Tahmini kalan: {format_elapsed(remaining)}")
+            else:
+                self.progress_detail_var.set(f"İşlenen: {format_elapsed(processed)}")
+                self.eta_var.set("Tahmini kalan: -")
+            if last_text:
+                preview = re.sub(r"\s+", " ", last_text).strip()
+                if len(preview) > 160:
+                    preview = preview[:157].rstrip() + "..."
+                self.last_segment_var.set(f"Son metin: {preview}")
+
+        self.after(0, _apply)
 
     def start_job(self):
         if self.is_busy():
@@ -511,6 +595,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             model_size=self.model_var.get(),
             cookies_browser=self.cookies_var.get(),
             language=self.language_var.get(),
+            test_first_minute=self.test_first_minute_var.get(),
         )
 
         if not opts.instagram_url and not opts.local_file:
@@ -520,6 +605,15 @@ class InstaYaziyaCevirApp(tk.Tk):
         if opts.instagram_url and opts.local_file:
             messagebox.showwarning(APP_NAME, "Hem link hem dosya seçili. Lütfen birini temizle ve tekrar dene.")
             return
+
+        if opts.instagram_url and not opts.test_first_minute:
+            proceed = messagebox.askyesno(
+                APP_NAME,
+                "Linkten gelen videonun süresi uzun olabilir. Devam edeyim mi?\n\n"
+                "Hızlı deneme için 'Sadece ilk 1 dakikayı test et' seçeneğini kullanabilirsin.",
+            )
+            if not proceed:
+                return
 
         self.set_buttons_busy(True)
         self.status_var.set("Çalışıyor...")
@@ -621,13 +715,41 @@ class InstaYaziyaCevirApp(tk.Tk):
                 "word_timestamps": True,
                 "hallucination_silence_threshold": 2.0,
             }
+            if opts.test_first_minute:
+                kwargs["clip_timestamps"] = "0,60"
+                self.log("Test modu açık: sadece ilk 1 dakika çevrilecek.")
+
             kwargs = supported_transcribe_kwargs(model, kwargs)
             segments_iter, info = model.transcribe(str(media_path), **kwargs)
-            raw_segments = list(segments_iter)
 
             detected = getattr(info, "language", "?")
             total_duration = getattr(info, "duration", None)
+            progress_total = float(total_duration or 0)
+            if opts.test_first_minute and progress_total:
+                progress_total = min(progress_total, 60.0)
             self.log(f"Algılanan dil: {detected}")
+            if total_duration:
+                self.log(f"Medya süresi: {format_elapsed(float(total_duration))}")
+                if float(total_duration) >= 600 and not opts.test_first_minute:
+                    self.log("Uzun medya algılandı. İşlem sürebilir; yüzde ve tahmini kalan süre ekranda güncellenecek.")
+
+            self.start_determinate_progress()
+            self.set_transcribe_progress(0, progress_total if progress_total else None)
+
+            raw_segments = []
+            for seg in segments_iter:
+                if self.cancel_requested:
+                    raise UserCancelled("İşlem kullanıcı tarafından iptal edildi.")
+                if opts.test_first_minute and float(getattr(seg, "start", 0) or 0) >= 60.0:
+                    break
+                raw_segments.append(seg)
+                processed = float(getattr(seg, "end", 0) or 0)
+                if opts.test_first_minute:
+                    processed = min(processed, 60.0)
+                self.set_transcribe_progress(processed, progress_total if progress_total else None, getattr(seg, "text", ""))
+
+            if self.cancel_requested:
+                raise UserCancelled("İşlem kullanıcı tarafından iptal edildi.")
 
             self.set_stage("Güvenli bitiş filtresi uygulanıyor")
             segments, removed_segments = clean_segments(raw_segments, total_duration)
@@ -654,6 +776,11 @@ class InstaYaziyaCevirApp(tk.Tk):
             self.set_status("Bitti")
             self.after(0, lambda: self._finish_activity("Tamamlandı"))
             self.after(0, lambda: messagebox.showinfo(APP_NAME, "Yazıya çevirme tamamlandı. Çıktı klasörünü açabilirsin."))
+        except UserCancelled as exc:
+            self.log(str(exc))
+            self.set_status("İptal edildi")
+            self.after(0, lambda: self._finish_activity("İptal edildi"))
+            self.after(0, lambda: messagebox.showinfo(APP_NAME, "İşlem iptal edildi."))
         except Exception as exc:
             self.log("HATA:")
             self.log(str(exc))

@@ -1,13 +1,15 @@
 MAC KULLANIYORSAN HEDEF DOSYA .EXE DEĞİL, .APP / .DMG'DİR.
 
-v1.4 ile özel terim alanı kaldırıldı. Link alanı artık genel Video linki mantığında çalışır.
-YouTube/Instagram indirme tarafı ffmpeg gerektirmeyecek şekilde tek dosya / sadece ses indirmeyi dener.
+Bu zip kaynak projedir. Final uygulamayı üretmenin en kolay yolu:
 
-GitHub'da build almak için:
-1) Bu klasördeki dosyaları repoya yükle.
-2) Actions > Build macOS app workflow'unu çalıştır.
-3) Artifacts bölümünden InstaYaziyaCevir-macOS-dmg dosyasını indir.
-4) DMG'yi aç, uygulamayı Applications klasörüne sürükle.
+1) GitHub reposuna bu klasördeki dosyaları yükle.
+2) src/InstaYaziyaCevir.py dosyasının güncellendiğinden emin ol.
+3) Actions sekmesine gir.
+4) Build macOS app > Run workflow de.
+5) Artifacts bölümünden InstaYaziyaCevir-macOS-dmg dosyasını indir.
+6) DMG'yi aç, uygulamayı Applications klasörüne sürükle.
 
-Instagram linki giriş isterse Chrome/Safari'de Instagram açıkken uygulamada Tarayıcı çerezi seç.
-macOS anahtar zinciri izin/parola sorarsa Mac kullanıcı parolanı girmen gerekir.
+v1.5 notu:
+- Canlı ilerleme yüzdesi, işlenen süre/toplam süre, tahmini kalan süre eklendi.
+- İptal butonu ve sadece ilk 1 dakika test modu eklendi.
+- Uzun videolarda önce small + ilk 1 dakika test modu ile deneme yap.
