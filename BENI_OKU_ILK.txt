@@ -1,16 +1,16 @@
 MAC KULLANIYORSAN HEDEF DOSYA .EXE DEĞİL, .APP / .DMG'DİR.
 
-Bu klasör v1.1 kaynak projedir.
-
-Bu sürümde:
-- Varsayılan model small oldu.
-- Model cache eklendi; aynı uygulama açıkken aynı model tekrar yüklenmez.
-- Video konusu / özel terimler alanı eklendi.
-- Modeli RAM'den temizle butonu eklendi.
+v1.2 yenilikleri:
+- turbo model seçeneği eklendi.
+- Geçen süre sayacı eklendi.
+- Aşama göstergesi eklendi.
+- Seçili modeli hazırla butonu eklendi.
+- Yüklü model bilgisi eklendi.
+- large-v3 / turbo için ilk kullanım uyarısı eklendi.
 
 Final uygulamayı üretmenin en kolay yolu:
 
-1) GitHub'da mevcut repoya bu dosyaları yükle veya yeni repo aç.
+1) GitHub'da mevcut repoya gir.
 2) Bu klasördeki dosyaları repoya yükle.
 3) Actions sekmesine gir.
 4) Build macOS app > Run workflow de.

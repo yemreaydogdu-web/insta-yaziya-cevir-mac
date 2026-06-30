@@ -4,8 +4,10 @@ import os
 import queue
 import re
 import threading
+import time
 import traceback
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -17,7 +19,7 @@ from faster_whisper import WhisperModel
 
 
 APP_NAME = "Insta Yazıya Çevir"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "InstaYaziyaCevir"
 
 
@@ -49,6 +51,16 @@ def format_timestamp(seconds: float, srt: bool = False) -> str:
     ms = millis % 1000
     sep = "," if srt else "."
     return f"{hours:02d}:{minutes:02d}:{secs:02d}{sep}{ms:03d}"
+
+
+def format_elapsed(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    if h:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
 
 
 def write_txt(path: Path, segments: Iterable) -> None:
@@ -151,10 +163,11 @@ class InstaYaziyaCevirApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"{APP_NAME} v{APP_VERSION}")
-        self.geometry("920x790")
-        self.minsize(780, 680)
+        self.geometry("950x830")
+        self.minsize(800, 720)
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.worker: Optional[threading.Thread] = None
+        self.preload_worker: Optional[threading.Thread] = None
         self.selected_file = tk.StringVar(value="")
         self.url_var = tk.StringVar(value="")
         self.output_var = tk.StringVar(value=str(DEFAULT_OUTPUT_DIR))
@@ -162,10 +175,17 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.cookies_var = tk.StringVar(value="Yok")
         self.language_var = tk.StringVar(value="tr")
         self.status_var = tk.StringVar(value="Hazır")
+        self.stage_var = tk.StringVar(value="Aşama: Hazır")
+        self.elapsed_var = tk.StringVar(value="Geçen süre: 00:00")
+        self.loaded_model_var = tk.StringVar(value="Yüklü model: Yok")
+        self.model_hint_var = tk.StringVar(value="Small: hızlı günlük kullanım. Large-v3: kalite modu. Turbo: large-v3'e yakın kaliteyi daha hızlı denemek için.")
         self.cached_model: Optional[WhisperModel] = None
         self.cached_model_size: Optional[str] = None
+        self.activity_start_time: Optional[float] = None
+        self.activity_running = False
         self._build_ui()
         self.after(100, self._poll_log)
+        self.after(250, self._update_elapsed)
 
     def _build_ui(self):
         pad = 14
@@ -179,9 +199,9 @@ class InstaYaziyaCevirApp(tk.Tk):
             root,
             text=(
                 "Instagram linki yapıştır veya bilgisayardan video/ses dosyası seç. "
-                "v1.1: small varsayılan, model cache ve konu/özel terim alanı eklendi."
+                "v1.2: turbo model, geçen süre sayacı, aşama göstergesi ve model hazırlama eklendi."
             ),
-            wraplength=860,
+            wraplength=900,
         )
         desc.pack(anchor="w", pady=(4, 16))
 
@@ -200,7 +220,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         context_help = ttk.Label(
             context_frame,
             text="Örnek: retainer, şeffaf plak, braket / Gemini, Kling, prompt / TÜİK, faiz, enflasyon",
-            wraplength=860,
+            wraplength=900,
         )
         context_help.pack(anchor="w", padx=10, pady=(8, 0))
         self.context_text = tk.Text(context_frame, wrap="word", height=3)
@@ -216,11 +236,12 @@ class InstaYaziyaCevirApp(tk.Tk):
         model_box = ttk.Combobox(
             row,
             textvariable=self.model_var,
-            values=["tiny", "base", "small", "medium", "large-v3"],
+            values=["tiny", "base", "small", "medium", "large-v3", "turbo"],
             width=12,
             state="readonly",
         )
         model_box.grid(row=0, column=1, padx=(8, 24), sticky="w")
+        model_box.bind("<<ComboboxSelected>>", self.on_model_changed)
 
         ttk.Label(row, text="Dil:").grid(row=0, column=2, sticky="w")
         lang_box = ttk.Combobox(
@@ -242,21 +263,36 @@ class InstaYaziyaCevirApp(tk.Tk):
         )
         cookies_box.grid(row=0, column=5, padx=(8, 0), sticky="w")
 
+        hint = ttk.Label(options, textvariable=self.model_hint_var, wraplength=900)
+        hint.pack(anchor="w", padx=10, pady=(0, 8))
+
         out_frame = ttk.Frame(options)
         out_frame.pack(fill="x", padx=10, pady=(0, 10))
         ttk.Label(out_frame, text="Çıktı klasörü:").pack(side="left")
         ttk.Entry(out_frame, textvariable=self.output_var).pack(side="left", fill="x", expand=True, padx=8)
         ttk.Button(out_frame, text="Klasör seç", command=self.choose_output).pack(side="left")
 
+        progress_frame = ttk.LabelFrame(root, text="İşlem durumu")
+        progress_frame.pack(fill="x", pady=(0, 10))
+        top_status = ttk.Frame(progress_frame)
+        top_status.pack(fill="x", padx=10, pady=(10, 6))
+        ttk.Label(top_status, textvariable=self.stage_var).pack(side="left")
+        ttk.Label(top_status, textvariable=self.elapsed_var).pack(side="right")
+        self.progress = ttk.Progressbar(progress_frame, mode="indeterminate")
+        self.progress.pack(fill="x", padx=10, pady=(0, 8))
+        ttk.Label(progress_frame, textvariable=self.loaded_model_var).pack(anchor="w", padx=10, pady=(0, 10))
+
         buttons = ttk.Frame(root)
         buttons.pack(fill="x", pady=(0, 10))
         self.start_button = ttk.Button(buttons, text="Yazıya çevir", command=self.start_job)
         self.start_button.pack(side="left")
+        self.preload_button = ttk.Button(buttons, text="Seçili modeli hazırla", command=self.preload_selected_model)
+        self.preload_button.pack(side="left", padx=(8, 0))
         ttk.Button(buttons, text="Çıktı klasörünü aç", command=self.open_output_dir).pack(side="left", padx=8)
         ttk.Button(buttons, text="Modeli RAM'den temizle", command=self.unload_model).pack(side="left")
         ttk.Label(buttons, textvariable=self.status_var).pack(side="right")
 
-        log_frame = ttk.LabelFrame(root, text="Durum")
+        log_frame = ttk.LabelFrame(root, text="Durum kaydı")
         log_frame.pack(fill="both", expand=True)
         self.log_text = tk.Text(log_frame, wrap="word", height=18)
         self.log_text.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
@@ -265,8 +301,21 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.log_text.configure(yscrollcommand=scroll.set)
 
         self.log("Hazır. Instagram linki gir veya dosya seç.")
-        self.log("Not: v1.1'de model aynı oturumda tekrar yüklenmez; aynı modelle ikinci video daha hızlı başlar.")
-        self.log("Not: Model ilk kez kullanılıyorsa indirme/yükleme biraz sürebilir.")
+        self.log("Not: Aynı oturumda aynı model tekrar yüklenmez; ikinci video daha hızlı başlar.")
+        self.log("Not: large-v3 ve turbo ilk kullanımda indirilebilir/yüklenebilir; sayaçtan bekleme süresini takip edebilirsin.")
+
+    def on_model_changed(self, _event=None):
+        model = self.model_var.get()
+        if model == "large-v3":
+            self.model_hint_var.set("Large-v3 kalite modudur. İlk kullanımda indirme/yükleme uzun sürebilir; ikinci kullanımda cache sayesinde hızlı başlar.")
+        elif model == "turbo":
+            self.model_hint_var.set("Turbo, large-v3 tabanlı hızlı kalite denemesidir. İlk kullanımda indirme/yükleme sürebilir; cache sonrası hızlı başlar.")
+        elif model == "medium":
+            self.model_hint_var.set("Medium dengeli moddur ama testte large-v3 kadar iyi çıkmayabilir.")
+        elif model == "small":
+            self.model_hint_var.set("Small hızlı günlük kullanım modudur; kalite gerekirse large-v3 veya turbo dene.")
+        else:
+            self.model_hint_var.set("Tiny/base çok hızlıdır ama Türkçe kalite düşük olabilir.")
 
     def choose_file(self):
         path = filedialog.askopenfilename(
@@ -290,17 +339,25 @@ class InstaYaziyaCevirApp(tk.Tk):
         os.system(f'open "{out}"')
 
     def unload_model(self):
-        if self.worker and self.worker.is_alive():
+        if self.is_busy():
             messagebox.showinfo(APP_NAME, "İşlem devam ederken model temizlenemez.")
             return
         self.cached_model = None
         self.cached_model_size = None
         gc.collect()
+        self.loaded_model_var.set("Yüklü model: Yok")
         self.log("Model RAM'den temizlendi.")
         self.status_var.set("Hazır")
 
+    def is_busy(self) -> bool:
+        return bool(
+            (self.worker and self.worker.is_alive())
+            or (self.preload_worker and self.preload_worker.is_alive())
+        )
+
     def log(self, msg: str):
-        self.log_queue.put(msg)
+        stamp = datetime.now().strftime("%H:%M:%S")
+        self.log_queue.put(f"[{stamp}] {msg}")
 
     def _poll_log(self):
         try:
@@ -312,8 +369,43 @@ class InstaYaziyaCevirApp(tk.Tk):
             pass
         self.after(100, self._poll_log)
 
+    def _start_activity(self, stage: str):
+        self.activity_start_time = time.monotonic()
+        self.activity_running = True
+        self.stage_var.set(f"Aşama: {stage}")
+        self.elapsed_var.set("Geçen süre: 00:00")
+        self.progress.start(12)
+
+    def _finish_activity(self, stage: str = "Tamamlandı"):
+        self.activity_running = False
+        if self.activity_start_time is not None:
+            self.elapsed_var.set(f"Geçen süre: {format_elapsed(time.monotonic() - self.activity_start_time)}")
+        self.stage_var.set(f"Aşama: {stage}")
+        self.progress.stop()
+
+    def _update_elapsed(self):
+        if self.activity_running and self.activity_start_time is not None:
+            elapsed = time.monotonic() - self.activity_start_time
+            self.elapsed_var.set(f"Geçen süre: {format_elapsed(elapsed)}")
+        self.after(500, self._update_elapsed)
+
+    def set_stage(self, stage: str):
+        self.after(0, lambda: self.stage_var.set(f"Aşama: {stage}"))
+
+    def set_status(self, status: str):
+        self.after(0, lambda: self.status_var.set(status))
+
+    def set_loaded_model_label(self, model_size: Optional[str]):
+        text = f"Yüklü model: {model_size}" if model_size else "Yüklü model: Yok"
+        self.after(0, lambda: self.loaded_model_var.set(text))
+
+    def set_buttons_busy(self, busy: bool):
+        state = "disabled" if busy else "normal"
+        self.start_button.configure(state=state)
+        self.preload_button.configure(state=state)
+
     def start_job(self):
-        if self.worker and self.worker.is_alive():
+        if self.is_busy():
             messagebox.showinfo(APP_NAME, "Zaten devam eden bir işlem var.")
             return
 
@@ -332,22 +424,57 @@ class InstaYaziyaCevirApp(tk.Tk):
             messagebox.showwarning(APP_NAME, "Instagram linki gir veya dosya seç.")
             return
 
-        self.start_button.configure(state="disabled")
+        self.set_buttons_busy(True)
         self.status_var.set("Çalışıyor...")
+        self._start_activity("Başlatılıyor")
         self.worker = threading.Thread(target=self.run_job, args=(opts,), daemon=True)
         self.worker.start()
+
+    def preload_selected_model(self):
+        if self.is_busy():
+            messagebox.showinfo(APP_NAME, "Zaten devam eden bir işlem var.")
+            return
+        model_size = self.model_var.get()
+        self.set_buttons_busy(True)
+        self.status_var.set("Model hazırlanıyor...")
+        self._start_activity(f"Model hazırlanıyor — {model_size}")
+        self.preload_worker = threading.Thread(target=self.run_preload, args=(model_size,), daemon=True)
+        self.preload_worker.start()
+
+    def run_preload(self, model_size: str):
+        try:
+            self.get_model(model_size)
+            self.log(f"Seçili model hazır: {model_size}")
+            self.set_status("Model hazır")
+            self.after(0, lambda: self._finish_activity("Model hazır"))
+        except Exception as exc:
+            self.log("HATA:")
+            self.log(str(exc))
+            self.log(traceback.format_exc())
+            self.set_status("Hata")
+            self.after(0, lambda: self._finish_activity("Hata"))
+            self.after(0, lambda: messagebox.showerror(APP_NAME, f"Model hazırlanamadı:\n\n{exc}"))
+        finally:
+            self.after(0, lambda: self.set_buttons_busy(False))
 
     def get_model(self, model_size: str) -> WhisperModel:
         if self.cached_model is not None and self.cached_model_size == model_size:
             self.log(f"Önceden yüklenmiş model kullanılıyor: {model_size}")
+            self.set_stage(f"Hazır model kullanılıyor — {model_size}")
             return self.cached_model
 
+        self.set_stage(f"Model yükleniyor — {model_size}")
         self.log(f"Model yükleniyor: {model_size}")
-        self.log("İlk kez kullanılıyorsa model indirilebilir; bu işlem biraz sürebilir.")
+        if model_size in {"large-v3", "turbo"}:
+            self.log("Büyük model seçildi. İlk kullanımda indirme/yükleme birkaç dakika sürebilir; sayaç işlem süresini gösterir.")
+        else:
+            self.log("İlk kez kullanılıyorsa model indirilebilir; bu işlem biraz sürebilir.")
         model = WhisperModel(model_size, device="cpu", compute_type="int8")
         self.cached_model = model
         self.cached_model_size = model_size
+        self.set_loaded_model_label(model_size)
         self.log(f"Model hazır: {model_size}")
+        self.set_stage(f"Model hazır — {model_size}")
         return model
 
     def run_job(self, opts: JobOptions):
@@ -358,6 +485,7 @@ class InstaYaziyaCevirApp(tk.Tk):
                 media_path = Path(opts.local_file)
                 self.log(f"Dosya seçildi: {media_path}")
             else:
+                self.set_stage("Instagram linki indiriliyor")
                 media_path = download_instagram(opts.instagram_url, opts.output_dir, opts.cookies_browser, self.log)
                 self.log(f"İndirildi: {media_path}")
 
@@ -376,6 +504,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             if initial_prompt:
                 self.log("Konu/özel terim bağlamı kullanılacak.")
 
+            self.set_stage("Yazıya çeviriliyor")
             self.log("Yazıya çevirme başladı...")
             kwargs = {
                 "language": language,
@@ -392,6 +521,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             detected = getattr(info, "language", "?")
             self.log(f"Algılanan dil: {detected}")
 
+            self.set_stage("Çıktılar yazılıyor")
             write_txt(txt_timed, segments)
             write_plain_txt(txt_plain, segments)
             write_srt(srt_path, segments)
@@ -400,16 +530,18 @@ class InstaYaziyaCevirApp(tk.Tk):
             self.log(f"Zamanlı TXT: {txt_timed}")
             self.log(f"Düz metin TXT: {txt_plain}")
             self.log(f"SRT altyazı: {srt_path}")
-            self.status_var.set("Bitti")
-            messagebox.showinfo(APP_NAME, "Yazıya çevirme tamamlandı. Çıktı klasörünü açabilirsin.")
+            self.set_status("Bitti")
+            self.after(0, lambda: self._finish_activity("Tamamlandı"))
+            self.after(0, lambda: messagebox.showinfo(APP_NAME, "Yazıya çevirme tamamlandı. Çıktı klasörünü açabilirsin."))
         except Exception as exc:
             self.log("HATA:")
             self.log(str(exc))
             self.log(traceback.format_exc())
-            self.status_var.set("Hata")
-            messagebox.showerror(APP_NAME, f"İşlem başarısız oldu:\n\n{exc}")
+            self.set_status("Hata")
+            self.after(0, lambda: self._finish_activity("Hata"))
+            self.after(0, lambda: messagebox.showerror(APP_NAME, f"İşlem başarısız oldu:\n\n{exc}"))
         finally:
-            self.start_button.configure(state="normal")
+            self.after(0, lambda: self.set_buttons_busy(False))
 
 
 if __name__ == "__main__":

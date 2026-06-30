@@ -1,17 +1,28 @@
-# Insta Yazıya Çevir — macOS app projesi v1.1
+# Insta Yazıya Çevir — macOS app projesi
 
-Bu proje Instagram/Reels linkinden veya bilgisayardaki video/ses dosyasından metin çıkarmak için basit bir macOS uygulaması üretir.
+Bu proje Instagram/Reels linkinden veya bilgisayardaki video/ses dosyasından Türkçe metin çıkarmak için basit bir macOS uygulaması üretir.
 
-## v1.1'de gelen değişiklikler
+## v1.2 yenilikleri
 
-- Varsayılan model `small` yapıldı.
-- Model cache eklendi: Uygulama açık kaldığı sürece aynı model tekrar tekrar yüklenmez.
-- "Modeli RAM'den temizle" butonu eklendi.
-- "Video konusu / özel terimler" alanı eklendi. Örneğin: `retainer, şeffaf plak, braket` veya `Gemini, Kling, prompt`.
-- Transkripsiyonda konu/terim alanı `initial_prompt` olarak kullanılır.
-- Hallucination riskini azaltmak için desteklenen sürümlerde `condition_on_previous_text=False` ve `temperature=0` denenir.
+- `turbo` model seçeneği eklendi.
+- Geçen süre sayacı eklendi.
+- Aşama göstergesi eklendi: model yükleniyor, yazıya çevriliyor, çıktılar yazılıyor vb.
+- Log satırlarına saat eklendi.
+- `Seçili modeli hazırla` butonu eklendi. Böylece büyük modeli video seçmeden önce yükleyebilirsin.
+- `Yüklü model` bilgisi eklendi.
+- `large-v3` ve `turbo` için büyük model uyarıları eklendi.
+- Model cache korunuyor: uygulama açık kaldığı sürece aynı model ikinci kez yüklenmez.
 
-## En kolay kullanım
+## Model mantığı
+
+- `small`: hızlı günlük kullanım.
+- `medium`: ara seviye deneme.
+- `large-v3`: kalite modu.
+- `turbo`: large-v3 tabanlı hızlı kalite modu denemesi.
+
+İlk kullanımda seçilen model indirilebilir ve yüklenebilir. Bu yüzden ilk çalıştırma uzun sürebilir. Aynı model uygulama açık kaldığı sürece RAM'de tutulur; ikinci video daha hızlı başlar.
+
+## Senin için en kolay hedef
 
 Mac'te kurulabilir dosya olarak şunlardan biri üretilecek:
 
@@ -26,16 +37,10 @@ Uygulama açılınca Instagram linkini yapıştırırsın veya dosya seçersin. 
 
 oluşturur.
 
-## Önemli not
-
-Bu klasör kaynak projedir. Final `.app` dosyası Mac üzerinde derlenmelidir. En temiz yöntem GitHub Actions kullanmaktır; bu sayede kendi Mac'ine Python/FFmpeg kurmadan `.app` ve `.dmg` çıktısı alırsın.
-
-Uygulama FFmpeg'i sistemden istemez; ses/video okuma tarafını `faster-whisper`/PyAV halleder. İlk kullanımda seçtiğin Whisper modeli indirileceği için biraz bekleyebilir. Aynı uygulama oturumunda aynı model tekrar kullanılınca yeniden yüklenmez.
-
 ## GitHub Actions ile `.app` üretme
 
-1. GitHub'da mevcut repoya bu dosyaları yükle veya yeni repo aç.
-2. Bu zip'in içindeki tüm dosyaları repoya yükle.
+1. GitHub'da repoya gir.
+2. Bu klasördeki dosyaları mevcut dosyaların üzerine yükle.
 3. GitHub'da repo sayfasında **Actions** sekmesine gir.
 4. **Build macOS app** workflow'unu seç.
 5. **Run workflow** de.
@@ -53,23 +58,33 @@ Uygulama imzalı/noter onaylı olmadığı için macOS ilk açılışta uyarı v
 2. **Open / Aç** de.
 3. Çıkan uyarıda tekrar **Open / Aç** de.
 
-## Kullanım önerisi
+## Mac'te kendin build almak istersen
+
+Mac'inde Python varsa:
+
+```bash
+bash build_macos.sh
+```
+
+Çıktılar:
+
+```text
+dist/InstaYaziyaCevir.app
+dist/InstaYaziyaCevir.dmg
+```
+
+## Kullanım
 
 1. Uygulamayı aç.
-2. Bilgisayardan kısa bir video seçerek test et.
-3. Modeli `small` bırak.
-4. Dil `tr` olsun.
-5. "Video konusu / özel terimler" alanına videoda geçebilecek özel kelimeleri yaz.
+2. Instagram linkini yapıştır veya dosya seç.
+3. Gerekirse "Video konusu / özel terimler" alanına konuyu ve önemli kelimeleri yaz.
+4. Model seç:
+   - `small`: hızlı
+   - `large-v3`: kaliteli
+   - `turbo`: hızlı kalite modu denemesi
+5. İstersen önce **Seçili modeli hazırla** butonuna bas.
 6. **Yazıya çevir** butonuna bas.
-7. Aynı modelle ikinci video işlenirken model tekrar yüklenmez.
-
-## Model seçimi
-
-- `tiny`: çok hızlı, kalite düşük.
-- `base`: hızlı, Türkçe kalite bazı videolarda zayıf.
-- `small`: önerilen varsayılan denge.
-- `medium`: daha iyi olabilir ama yavaş.
-- `large-v3`: en ağır seçenek; Mac'te çok uzun sürebilir.
+7. Çıktı klasöründen `.txt` ve `.srt` dosyalarını al.
 
 ## Instagram linkleri bazen neden çalışmaz?
 
