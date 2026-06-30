@@ -20,7 +20,7 @@ from faster_whisper import WhisperModel
 
 
 APP_NAME = "Insta Yazıya Çevir"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "InstaYaziyaCevir"
 
 
@@ -148,11 +148,11 @@ SUSPICIOUS_ENDING_PATTERNS = [
     "altyazi mk",
     "altyazi m k",
     "altyazilar",
-    "ceviri",
     "ceviri ve altyazi",
     "subtitles by",
     "captions by",
     "caption",
+    "transcription by",
     "izlediginiz icin tesekkurler",
     "abone olmayi unutmayin",
     "like ve abone",
@@ -165,9 +165,36 @@ def normalize_for_filter(text: str) -> str:
     text = unicodedata.normalize("NFKD", text or "")
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     text = text.lower()
-    text = re.sub(r"[^a-z0-9ğüşöçıİ\s\.]+", " ", text)
+    # Türkçe karakterleri filtre eşleştirmesi için sadeleştir. Özellikle "altyazı" -> "altyazi" gerekli.
+    table = str.maketrans({
+        "ı": "i", "ğ": "g", "ü": "u", "ş": "s", "ö": "o", "ç": "c",
+    })
+    text = text.translate(table)
+    text = re.sub(r"[^a-z0-9\s\.]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def contains_suspicious_signature(norm: str) -> bool:
+    """Kısa jenerik/altyazı imzası yakalar; normal konuşmadaki 'çeviriyor' gibi kelimeleri yakalamaz."""
+    if not norm:
+        return False
+
+    # Çok tipik altyazı/jenerik imzaları.
+    phrase_patterns = [
+        "altyazi", "altyazi mk", "altyazi m k", "altyazilar",
+        "ceviri ve altyazi", "subtitles by", "captions by", "caption by",
+        "transcription by", "izlediginiz icin tesekkurler", "abone olmayi unutmayin",
+        "like ve abone", "www.", ".com",
+    ]
+    if any(pattern in norm for pattern in phrase_patterns):
+        return True
+
+    # Tek başına "çeviri" sadece satır gerçekten jenerik imzası gibi çok kısaysa yakalansın.
+    if re.fullmatch(r"(ceviri|translated by|translation by)( [a-z0-9]{1,20}){0,4}", norm):
+        return True
+
+    return False
 
 
 def is_suspicious_segment(seg, total_duration: Optional[float] = None) -> bool:
@@ -185,15 +212,14 @@ def is_suspicious_segment(seg, total_duration: Optional[float] = None) -> bool:
     start = float(getattr(seg, "start", 0) or 0)
 
     # Çok kısa jenerik/altyazı imzası tipi satırları sil.
-    if len(norm) <= 90 and any(pattern in norm for pattern in SUSPICIOUS_ENDING_PATTERNS):
+    if len(norm) <= 120 and contains_suspicious_signature(norm):
         return True
 
-    # Videonun son bölümünde çok uzun süreye yayılan ama çok kısa kalan satırlar şüpheli.
+    # Videonun son bölümünde çok uzun süreye yayılan ama çok kısa kalan jenerik satırlar şüpheli.
     if total_duration and total_duration > 0:
         in_last_third = start >= total_duration * 0.60
-        if in_last_third and duration >= 8 and len(norm) <= 80:
-            if any(pattern in norm for pattern in SUSPICIOUS_ENDING_PATTERNS):
-                return True
+        if in_last_third and duration >= 8 and len(norm) <= 120 and contains_suspicious_signature(norm):
+            return True
 
     # Tek satırın 20+ saniyeye uzayıp birkaç kelimeden ibaret olması genellikle sessizlik hallucination'ıdır.
     if duration >= 20 and len(norm.split()) <= 5:
@@ -274,6 +300,11 @@ def download_media(url: str, output_dir: Path, cookies_browser: str, log) -> Pat
 
     return path
 
+
+def is_instagram_url(url: str) -> bool:
+    return bool(re.search(r"https?://([^/]+\.)?instagram\.com/", url or "", re.I))
+
+
 class InstaYaziyaCevirApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -299,11 +330,12 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.last_segment_var = tk.StringVar(value="Son metin: -")
         self.progress_value = tk.DoubleVar(value=0.0)
         self.cancel_requested = False
-        self.model_hint_var = tk.StringVar(value="Small: hızlı taslak. Large-v3: kalite modu. Turbo: deneysel hızlı kalite. v1.5 canlı ilerleme, iptal ve 1 dk test modu eklendi.")
+        self.model_hint_var = tk.StringVar(value="Small: hızlı taslak. Large-v3: kalite modu. Turbo: deneysel hızlı kalite. v1.6 Instagram/altyazı filtresi iyileştirildi.")
         self.cached_model: Optional[WhisperModel] = None
         self.cached_model_size: Optional[str] = None
         self.activity_start_time: Optional[float] = None
         self.activity_running = False
+        self.current_progress_total: Optional[float] = None
         self._build_ui()
         self.after(100, self._poll_log)
         self.after(250, self._update_elapsed)
@@ -320,7 +352,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             root,
             text=(
                 "Video linki yapıştır veya bilgisayardan video/ses dosyası seç. "
-                "v1.5: canlı yüzde/işlenen süre, iptal butonu ve ilk 1 dakika test modu eklendi."
+                "v1.6: Instagram uyarısı, kısa altyazı filtresi ve tamamlanınca %100 düzeltmesi eklendi."
             ),
             wraplength=900,
         )
@@ -430,7 +462,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.log("Hazır. Video linki gir veya dosya seç.")
         self.log("Not: Aynı oturumda aynı model tekrar yüklenmez; ikinci video daha hızlı başlar.")
         self.log("Not: large-v3 ve turbo ilk kullanımda indirilebilir/yüklenebilir; sayaçtan bekleme süresini takip edebilirsin.")
-        self.log("Not: v1.5 işlem sırasında işlenen süre/yüzde gösterir; uzun videoda ilk 1 dakika test modunu kullanabilirsin.")
+        self.log("Not: v1.6 işlem bittiğinde ilerleme %100/kalan 00:00 gösterir; kısa sahte altyazı imzalarını da temizler.")
         self.log("Not: Linkten indirirken ffmpeg merge istemez; YouTube/Instagram linklerini tek dosya/ses olarak dener.")
 
     def on_model_changed(self, _event=None):
@@ -502,6 +534,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.activity_start_time = time.monotonic()
         self.activity_running = True
         self.cancel_requested = False
+        self.current_progress_total = None
         self.stage_var.set(f"Aşama: {stage}")
         self.elapsed_var.set("Geçen süre: 00:00")
         self.progress.configure(mode="indeterminate")
@@ -519,6 +552,14 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.progress.configure(mode="determinate")
         if stage == "Tamamlandı":
             self.progress_value.set(100)
+            total = self.current_progress_total or 0
+            if total > 0:
+                self.progress_detail_var.set(
+                    f"İşlenen: {format_elapsed(total)} / {format_elapsed(total)} (100%)"
+                )
+            else:
+                self.progress_detail_var.set("İşlenen: tamamlandı (100%)")
+            self.eta_var.set("Tahmini kalan: 00:00")
         elif stage == "İptal edildi":
             self.progress_detail_var.set("İlerleme: işlem iptal edildi")
             self.eta_var.set("Tahmini kalan: -")
@@ -562,6 +603,7 @@ class InstaYaziyaCevirApp(tk.Tk):
     def set_transcribe_progress(self, processed: float, total: Optional[float], last_text: str = ""):
         def _apply():
             if total and total > 0:
+                self.current_progress_total = float(total)
                 percent = max(0.0, min(100.0, (processed / total) * 100.0))
                 self.progress_value.set(percent)
                 self.progress_detail_var.set(
@@ -605,6 +647,16 @@ class InstaYaziyaCevirApp(tk.Tk):
         if opts.instagram_url and opts.local_file:
             messagebox.showwarning(APP_NAME, "Hem link hem dosya seçili. Lütfen birini temizle ve tekrar dene.")
             return
+
+        if is_instagram_url(opts.instagram_url) and opts.cookies_browser == "Yok":
+            proceed = messagebox.askyesno(
+                APP_NAME,
+                "Bu bir Instagram linki. Instagram içerikleri çoğunlukla tarayıcı çerezi ister.\n\n"
+                "Şu an Tarayıcı çerezi 'Yok' seçili. Yine de çerezsiz deneyeyim mi?\n\n"
+                "Öneri: Hayır de, Tarayıcı çerezi olarak Chrome veya Safari seç ve tekrar dene.",
+            )
+            if not proceed:
+                return
 
         if opts.instagram_url and not opts.test_first_minute:
             proceed = messagebox.askyesno(
@@ -763,6 +815,9 @@ class InstaYaziyaCevirApp(tk.Tk):
                 self.log(f"Ham çıktı ayrıca kaydedildi: {raw_txt_plain}")
             else:
                 self.log("Güvenli bitiş filtresi kaldırılacak şüpheli segment bulmadı.")
+
+            if segments:
+                self.set_transcribe_progress(progress_total if progress_total else float(segments[-1].end), progress_total if progress_total else None, segments[-1].text)
 
             self.set_stage("Çıktılar yazılıyor")
             write_txt(txt_timed, segments)
