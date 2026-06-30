@@ -1,0 +1,40 @@
+name: Build macOS app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-macos:
+    name: Build InstaYaziyaCevir.app
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build app and DMG
+        run: bash build_macos.sh
+
+      - name: Zip app
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent InstaYaziyaCevir.app InstaYaziyaCevir.app.zip
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: InstaYaziyaCevir-macOS-app
+          path: dist/InstaYaziyaCevir.app.zip
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: InstaYaziyaCevir-macOS-dmg
+          path: dist/InstaYaziyaCevir.dmg
