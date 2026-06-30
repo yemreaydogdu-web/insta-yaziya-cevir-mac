@@ -2,7 +2,7 @@
 
 Bu proje Instagram/Reels linkinden veya bilgisayardaki video/ses dosyasından Türkçe metin çıkarmak için basit bir macOS uygulaması üretir.
 
-## v1.2 yenilikleri
+## v1.3 yenilikleri
 
 - `turbo` model seçeneği eklendi.
 - Geçen süre sayacı eklendi.
@@ -104,3 +104,13 @@ build_macos.sh                       Mac build scripti
 packaging/create_dmg.sh              DMG üretimi
 .github/workflows/build-macos.yml    GitHub Actions ile otomatik Mac build
 ```
+
+
+## v1.3 notları
+
+- `large-v3` ana kalite modu olarak korunur.
+- `turbo` deneysel hızlı kalite modu olarak durur.
+- Geçen süre sayacı ve aşama göstergesi devam eder.
+- Güvenli bitiş filtresi eklendi: Whisper’ın sessizlik sonunda ürettiği `Altyazı M.K.`, `Çeviri...`, `Abone olmayı unutmayın` gibi sahte kapanış/jenerik satırlarını ana çıktıdan temizler.
+- Filtre bir segment kaldırırsa ham çıktı ayrıca `*.ham.duz_metin.txt`, `*.ham.zamanli.txt`, `*.ham.srt` olarak kaydedilir.
+- Transkripsiyon ayarlarında `no_speech_threshold`, `hallucination_silence_threshold`, `condition_on_previous_text=False` ve daha sıkı VAD ayarları kullanılır.

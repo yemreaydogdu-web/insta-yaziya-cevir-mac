@@ -1,6 +1,6 @@
 MAC KULLANIYORSAN HEDEF DOSYA .EXE DEĞİL, .APP / .DMG'DİR.
 
-v1.2 yenilikleri:
+v1.3 yenilikleri:
 - turbo model seçeneği eklendi.
 - Geçen süre sayacı eklendi.
 - Aşama göstergesi eklendi.

@@ -1,6 +1,7 @@
 import gc
 import inspect
 import os
+import unicodedata
 import queue
 import re
 import threading
@@ -19,7 +20,7 @@ from faster_whisper import WhisperModel
 
 
 APP_NAME = "Insta Yazıya Çevir"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "InstaYaziyaCevir"
 
 
@@ -124,6 +125,84 @@ def supported_transcribe_kwargs(model: WhisperModel, kwargs: dict) -> dict:
     return {key: value for key, value in kwargs.items() if key in allowed and value is not None}
 
 
+@dataclass
+class CleanSegment:
+    start: float
+    end: float
+    text: str
+
+
+SUSPICIOUS_ENDING_PATTERNS = [
+    "altyazi",
+    "altyazi mk",
+    "altyazi m k",
+    "altyazilar",
+    "ceviri",
+    "ceviri ve altyazi",
+    "subtitles by",
+    "captions by",
+    "caption",
+    "izlediginiz icin tesekkurler",
+    "abone olmayi unutmayin",
+    "like ve abone",
+    "www.",
+    ".com",
+]
+
+
+def normalize_for_filter(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9ğüşöçıİ\s\.]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def is_suspicious_segment(seg, total_duration: Optional[float] = None) -> bool:
+    """Whisper'ın sessizlik/jenerik sonunda uydurabildiği kısa kapanış satırlarını yakalar.
+
+    Bu filtre genel konuşma metnini düzeltmez; sadece çok tipik sahte altyazı/jenerik
+    satırlarını ana çıktıdan temizler. Ham çıktı ayrıca kaydedildiği için izlenebilirlik korunur.
+    """
+    text = (getattr(seg, "text", "") or "").strip()
+    if not text:
+        return True
+
+    norm = normalize_for_filter(text)
+    duration = float(getattr(seg, "end", 0) or 0) - float(getattr(seg, "start", 0) or 0)
+    start = float(getattr(seg, "start", 0) or 0)
+
+    # Çok kısa jenerik/altyazı imzası tipi satırları sil.
+    if len(norm) <= 90 and any(pattern in norm for pattern in SUSPICIOUS_ENDING_PATTERNS):
+        return True
+
+    # Videonun son bölümünde çok uzun süreye yayılan ama çok kısa kalan satırlar şüpheli.
+    if total_duration and total_duration > 0:
+        in_last_third = start >= total_duration * 0.60
+        if in_last_third and duration >= 8 and len(norm) <= 80:
+            if any(pattern in norm for pattern in SUSPICIOUS_ENDING_PATTERNS):
+                return True
+
+    # Tek satırın 20+ saniyeye uzayıp birkaç kelimeden ibaret olması genellikle sessizlik hallucination'ıdır.
+    if duration >= 20 and len(norm.split()) <= 5:
+        return True
+
+    return False
+
+
+def clean_segments(segments: list, total_duration: Optional[float] = None):
+    cleaned = []
+    removed = []
+    for seg in segments:
+        text = (getattr(seg, "text", "") or "").strip()
+        if is_suspicious_segment(seg, total_duration):
+            removed.append(seg)
+            continue
+        cleaned.append(CleanSegment(float(seg.start), float(seg.end), text))
+    return cleaned, removed
+
+
 def download_instagram(url: str, output_dir: Path, cookies_browser: str, log) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -178,7 +257,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.stage_var = tk.StringVar(value="Aşama: Hazır")
         self.elapsed_var = tk.StringVar(value="Geçen süre: 00:00")
         self.loaded_model_var = tk.StringVar(value="Yüklü model: Yok")
-        self.model_hint_var = tk.StringVar(value="Small: hızlı günlük kullanım. Large-v3: kalite modu. Turbo: large-v3'e yakın kaliteyi daha hızlı denemek için.")
+        self.model_hint_var = tk.StringVar(value="Small: hızlı taslak. Large-v3: kalite modu. Turbo: deneysel hızlı kalite. v1.3 güvenli bitiş filtresi açık.")
         self.cached_model: Optional[WhisperModel] = None
         self.cached_model_size: Optional[str] = None
         self.activity_start_time: Optional[float] = None
@@ -199,7 +278,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             root,
             text=(
                 "Instagram linki yapıştır veya bilgisayardan video/ses dosyası seç. "
-                "v1.2: turbo model, geçen süre sayacı, aşama göstergesi ve model hazırlama eklendi."
+                "v1.3: güvenli bitiş filtresi, hallucination azaltma ayarları, turbo/large-v3 test modu ve sayaç eklendi."
             ),
             wraplength=900,
         )
@@ -303,13 +382,14 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.log("Hazır. Instagram linki gir veya dosya seç.")
         self.log("Not: Aynı oturumda aynı model tekrar yüklenmez; ikinci video daha hızlı başlar.")
         self.log("Not: large-v3 ve turbo ilk kullanımda indirilebilir/yüklenebilir; sayaçtan bekleme süresini takip edebilirsin.")
+        self.log("Not: v1.3 güvenli bitiş filtresi, sahte altyazı/jenerik kapanışlarını ana çıktıdan temizler.")
 
     def on_model_changed(self, _event=None):
         model = self.model_var.get()
         if model == "large-v3":
-            self.model_hint_var.set("Large-v3 kalite modudur. İlk kullanımda indirme/yükleme uzun sürebilir; ikinci kullanımda cache sayesinde hızlı başlar.")
+            self.model_hint_var.set("Large-v3 ana kalite modudur. İlk kullanımda uzun sürebilir; ikinci kullanımda cache sayesinde hızlı başlar.")
         elif model == "turbo":
-            self.model_hint_var.set("Turbo, large-v3 tabanlı hızlı kalite denemesidir. İlk kullanımda indirme/yükleme sürebilir; cache sonrası hızlı başlar.")
+            self.model_hint_var.set("Turbo deneysel hızlı kalite modudur. Kalite large-v3 kadar stabil olmayabilir; v1.3 güvenli bitiş filtresi açıktır.")
         elif model == "medium":
             self.model_hint_var.set("Medium dengeli moddur ama testte large-v3 kadar iyi çıkmayabilir.")
         elif model == "small":
@@ -496,6 +576,9 @@ class InstaYaziyaCevirApp(tk.Tk):
             txt_timed = opts.output_dir / f"{base_name}.zamanli.txt"
             txt_plain = opts.output_dir / f"{base_name}.duz_metin.txt"
             srt_path = opts.output_dir / f"{base_name}.srt"
+            raw_txt_timed = opts.output_dir / f"{base_name}.ham.zamanli.txt"
+            raw_txt_plain = opts.output_dir / f"{base_name}.ham.duz_metin.txt"
+            raw_srt_path = opts.output_dir / f"{base_name}.ham.srt"
 
             model = self.get_model(opts.model_size)
 
@@ -509,17 +592,40 @@ class InstaYaziyaCevirApp(tk.Tk):
             kwargs = {
                 "language": language,
                 "vad_filter": True,
+                "vad_parameters": {
+                    "min_silence_duration_ms": 700,
+                    "speech_pad_ms": 200,
+                },
                 "beam_size": 5,
                 "initial_prompt": initial_prompt,
                 "condition_on_previous_text": False,
                 "temperature": 0,
+                "no_speech_threshold": 0.72,
+                "compression_ratio_threshold": 2.4,
+                "log_prob_threshold": -1.0,
+                "word_timestamps": True,
+                "hallucination_silence_threshold": 2.0,
             }
             kwargs = supported_transcribe_kwargs(model, kwargs)
             segments_iter, info = model.transcribe(str(media_path), **kwargs)
-            segments = list(segments_iter)
+            raw_segments = list(segments_iter)
 
             detected = getattr(info, "language", "?")
+            total_duration = getattr(info, "duration", None)
             self.log(f"Algılanan dil: {detected}")
+
+            self.set_stage("Güvenli bitiş filtresi uygulanıyor")
+            segments, removed_segments = clean_segments(raw_segments, total_duration)
+            if removed_segments:
+                self.log(f"Güvenli bitiş filtresi {len(removed_segments)} şüpheli segmenti ana çıktıdan kaldırdı.")
+                for removed in removed_segments[:5]:
+                    self.log(f"Kaldırılan segment: [{format_timestamp(removed.start)} - {format_timestamp(removed.end)}] {removed.text.strip()}")
+                write_txt(raw_txt_timed, raw_segments)
+                write_plain_txt(raw_txt_plain, raw_segments)
+                write_srt(raw_srt_path, raw_segments)
+                self.log(f"Ham çıktı ayrıca kaydedildi: {raw_txt_plain}")
+            else:
+                self.log("Güvenli bitiş filtresi kaldırılacak şüpheli segment bulmadı.")
 
             self.set_stage("Çıktılar yazılıyor")
             write_txt(txt_timed, segments)
