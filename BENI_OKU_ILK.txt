@@ -1,13 +1,15 @@
 MAC KULLANIYORSAN HEDEF DOSYA .EXE DEĞİL, .APP / .DMG'DİR.
 
-v1.6 notları:
-- Instagram linklerinde çerez Yok ise uygulama önceden uyarır.
-- Instagram için Chrome/Safari çerezi seçmen gerekebilir.
-- Kısa "Altyazı M.K." gibi sahte altyazı kapanışları ana çıktıdan temizlenir.
-- İş bitince ilerleme %100 ve kalan süre 00:00 olarak sabitlenir.
+v1.7 ana değişiklik:
+- İşlem sonrası hızlı düzeltme editörü açılır.
+- Şüpheli kelimeler sarı işaretlenir.
+- Tıklayınca öneriler çıkar, doğru olanı seçebilirsin.
+- Sadece iki temiz çıktı üretilir:
+  1) zamanli.txt
+  2) duz_metin.txt
 
-Build:
-1) Dosyaları GitHub reposuna yükle.
-2) Actions > Build macOS app > Run workflow.
-3) Artifacts bölümünden DMG'yi indir.
-4) DMG'yi aç, uygulamayı Applications klasörüne sürükle.
+GitHub'da build almak için:
+1) Dosyaları repoya yükle.
+2) Commit changes de.
+3) Actions > Build macOS app > Run workflow.
+4) Artifacts bölümünden macOS-dmg dosyasını indir.

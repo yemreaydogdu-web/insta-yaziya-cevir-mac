@@ -20,7 +20,7 @@ from faster_whisper import WhisperModel
 
 
 APP_NAME = "Insta Yazıya Çevir"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "InstaYaziyaCevir"
 
 
@@ -305,6 +305,58 @@ def is_instagram_url(url: str) -> bool:
     return bool(re.search(r"https?://([^/]+\.)?instagram\.com/", url or "", re.I))
 
 
+# Hızlı editör için yerel, API'siz şüpheli ifade önerileri.
+# Bu liste metni otomatik değiştirmez; yalnızca editörde işaretler ve seçenek sunar.
+SUGGESTION_RULES = [
+    (r"\bdiş etkanamaları\b", ["diş eti kanamaları"]),
+    (r"\bboşluklar kapağını\b", ["boşluklar kapandı", "boşluklar kapanmış"]),
+    (r"\bAktif tedavi ettikten sonra\b", ["Aktif tedavi bittikten sonra", "Aktif tedavi bitirdikten sonra"]),
+    (r"\bAktif tedavi ürtikten sonra\b", ["Aktif tedavi bittikten sonra"]),
+    (r"\bdişlerimiz bir süre daha harekette olurlar\b", ["dişlerimiz bir süre daha hareketli olurlar"]),
+    (r"\bBu hareketler engel olmak için\b", ["Bu hareketleri engellemek için"]),
+    (r"\bBu hareketlere engel olmak için\b", ["Bu hareketleri engellemek için"]),
+    (r"\bhastalarımızı öneriyoruz\b", ["hastalarımıza öneriyoruz"]),
+    (r"\b(?:İttenerlerimizi|Ittenerlerimizi|Retainerlerimizi|retainerlerimizi)\b", ["Retainerlarımızı", "retainerlarımızı"]),
+    (r"\bzorleşir\b", ["zorlaşır"]),
+    (r"\bkullandıysanız\b", ["kullanmadıysanız", "kullandıysanız"]),
+    (r"\bCemgür Deniz\b", ["Cem Gürdeniz"]),
+    (r"\bMavi Vatan Vötesi\b", ["Mavi Vatan ve Ötesi"]),
+    (r"\bsayınamayalım\b", ["Sayın Amiralim"]),
+    (r"\bSayın Emre'lim\b", ["Sayın Amiralim"]),
+    (r"\bAmir Ali\b", ["Amiralim"]),
+    (r"\bAmirelim\b", ["Amiralim"]),
+    (r"\bTempus Fu(?:ji|gi)\b", ["Tempus fugit"]),
+    (r"\bcohap politik\b", ["jeopolitik"]),
+    (r"\bcehep politik\b", ["jeopolitik"]),
+    (r"\btink[- ]tankler\b", ["think-tankler"]),
+    (r"\bsionist\b", ["siyonist"]),
+    (r"\bNetenyağı\b", ["Netanyahu"]),
+    (r"\bJ\.?D\.?\s*Wens\b", ["J.D. Vance"]),
+    (r"\bJDVen\b", ["J.D. Vance"]),
+    (r"\bSimotrik\b", ["Smotrich"]),
+    (r"\bBengavir\b", ["Ben-Gvir"]),
+    (r"\bBenkıvil\b", ["Ben-Gvir"]),
+    (r"\bKenar Bahçe\b", ["Fenerbahçe"]),
+    (r"\bKenar bahçe\b", ["Fenerbahçe"]),
+    (r"\bMatteo Genduzli\b", ["Matteo Guendouzi"]),
+    (r"\bMateo Genduzzi\b", ["Matteo Guendouzi"]),
+]
+
+REPEATED_WORD_RE = re.compile(r"\b([A-Za-zÇĞİÖŞÜçğıöşü]{3,})(?:\s+\1){3,}\b", re.IGNORECASE)
+TIMESTAMP_LINE_RE = re.compile(r"^\[[^\]]+\]\s*(.*)$")
+
+
+def plain_from_timed_text(text: str) -> str:
+    parts = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = TIMESTAMP_LINE_RE.match(line)
+        parts.append((m.group(1) if m else line).strip())
+    return re.sub(r"\s+", " ", " ".join(p for p in parts if p)).strip() + "\n"
+
+
 class InstaYaziyaCevirApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -330,7 +382,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.last_segment_var = tk.StringVar(value="Son metin: -")
         self.progress_value = tk.DoubleVar(value=0.0)
         self.cancel_requested = False
-        self.model_hint_var = tk.StringVar(value="Small: hızlı taslak. Large-v3: kalite modu. Turbo: deneysel hızlı kalite. v1.6 Instagram/altyazı filtresi iyileştirildi.")
+        self.model_hint_var = tk.StringVar(value="Small: hızlı taslak. Large-v3: kalite modu. v1.7 editör ve iki temiz çıktı üretir.")
         self.cached_model: Optional[WhisperModel] = None
         self.cached_model_size: Optional[str] = None
         self.activity_start_time: Optional[float] = None
@@ -352,7 +404,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             root,
             text=(
                 "Video linki yapıştır veya bilgisayardan video/ses dosyası seç. "
-                "v1.6: Instagram uyarısı, kısa altyazı filtresi ve tamamlanınca %100 düzeltmesi eklendi."
+                "v1.7: hızlı düzeltme editörü, şüpheli kelime önerileri ve yalnızca iki temiz çıktı eklendi."
             ),
             wraplength=900,
         )
@@ -624,6 +676,185 @@ class InstaYaziyaCevirApp(tk.Tk):
 
         self.after(0, _apply)
 
+    def find_suggestions_in_text(self, text: str):
+        """Editörde işaretlenecek şüpheli aralıkları bulur.
+
+        Otomatik düzeltme yapmaz. Kullanıcı sadece sarı işaretli alanlara tıklayıp
+        önerilerden birini seçerse metin değişir.
+        """
+        matches = []
+        occupied = []
+
+        def overlaps(a, b):
+            return not (a[1] <= b[0] or b[1] <= a[0])
+
+        for pattern, suggestions in SUGGESTION_RULES:
+            for m in re.finditer(pattern, text, flags=re.IGNORECASE):
+                span = m.span()
+                if any(overlaps(span, ex) for ex in occupied):
+                    continue
+                matches.append({"start": span[0], "end": span[1], "text": m.group(0), "suggestions": suggestions})
+                occupied.append(span)
+
+        for m in REPEATED_WORD_RE.finditer(text):
+            span = m.span()
+            if any(overlaps(span, ex) for ex in occupied):
+                continue
+            word = m.group(1)
+            matches.append({"start": span[0], "end": span[1], "text": m.group(0), "suggestions": [word]})
+            occupied.append(span)
+
+        return sorted(matches, key=lambda item: item["start"])
+
+    def open_correction_editor(self, timed_path: Path, plain_path: Path):
+        """Zamanlı metni düzenlemek için küçük editör açar.
+
+        Kaydettiğinde yalnızca iki temiz çıktı dosyası güncellenir:
+        - *.zamanli.txt
+        - *.duz_metin.txt
+        """
+        try:
+            timed_text = Path(timed_path).read_text(encoding="utf-8")
+        except Exception as exc:
+            self.log(f"Editör açılamadı: {exc}")
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Metin Düzeltme Editörü")
+        win.geometry("1050x760")
+        win.minsize(850, 600)
+        win.transient(self)
+
+        state = {"current": None, "tags": {}, "timed_path": Path(timed_path), "plain_path": Path(plain_path)}
+
+        header = ttk.Frame(win, padding=(12, 10))
+        header.pack(fill="x")
+        ttk.Label(header, text="Metin Düzeltme Editörü", font=("Arial", 16, "bold")).pack(side="left")
+        ttk.Label(header, text="Sarı işaretli şüpheli kelime/ifadeye tıkla, alttan öneriyi seç.").pack(side="left", padx=(14, 0))
+
+        main = ttk.Frame(win, padding=(12, 0, 12, 8))
+        main.pack(fill="both", expand=True)
+
+        text_frame = ttk.LabelFrame(main, text="Zamanlı metin — burada düzenle")
+        text_frame.pack(fill="both", expand=True)
+        editor = tk.Text(text_frame, wrap="word", undo=True, height=24)
+        editor.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
+        scroll = ttk.Scrollbar(text_frame, command=editor.yview)
+        scroll.pack(side="right", fill="y", padx=(0, 8), pady=8)
+        editor.configure(yscrollcommand=scroll.set)
+        editor.insert("1.0", timed_text)
+        editor.tag_configure("suspect", background="#fff2a8", underline=True)
+        editor.tag_configure("selected_suspect", background="#ffd36b", underline=True)
+
+        suggest_frame = ttk.LabelFrame(main, text="Öneriler")
+        suggest_frame.pack(fill="x", pady=(8, 0))
+        suggest_info = ttk.Label(suggest_frame, text="Şüpheli bir kelimeye tıklayın.")
+        suggest_info.pack(anchor="w", padx=10, pady=(8, 4))
+        buttons_row = ttk.Frame(suggest_frame)
+        buttons_row.pack(fill="x", padx=10, pady=(0, 8))
+
+        preview_frame = ttk.LabelFrame(main, text="Düz metin önizleme")
+        preview_frame.pack(fill="both", expand=False, pady=(8, 0))
+        preview = tk.Text(preview_frame, wrap="word", height=6)
+        preview.pack(fill="both", expand=True, padx=8, pady=8)
+        preview.insert("1.0", plain_from_timed_text(timed_text))
+
+        def clear_suggestion_buttons():
+            for child in buttons_row.winfo_children():
+                child.destroy()
+
+        def select_tag(tag_name: str):
+            meta = state["tags"].get(tag_name)
+            if not meta:
+                return
+            if state["current"]:
+                editor.tag_remove("selected_suspect", "1.0", "end")
+            state["current"] = tag_name
+            start, end = meta["start_index"], meta["end_index"]
+            editor.tag_add("selected_suspect", start, end)
+            suggest_info.configure(text=f"Şüpheli: {meta['text']}")
+            clear_suggestion_buttons()
+            for suggestion in meta["suggestions"]:
+                ttk.Button(buttons_row, text=suggestion, command=lambda s=suggestion: apply_suggestion(s)).pack(side="left", padx=(0, 8))
+            ttk.Button(buttons_row, text="Yok say", command=ignore_current).pack(side="left", padx=(8, 0))
+
+        def apply_suggestion(suggestion: str):
+            tag_name = state.get("current")
+            meta = state["tags"].get(tag_name) if tag_name else None
+            if not meta:
+                return
+            start, end = meta["start_index"], meta["end_index"]
+            editor.delete(start, end)
+            editor.insert(start, suggestion)
+            rescan()
+
+        def ignore_current():
+            tag_name = state.get("current")
+            if not tag_name:
+                return
+            editor.tag_remove(tag_name, "1.0", "end")
+            editor.tag_remove("selected_suspect", "1.0", "end")
+            state["tags"].pop(tag_name, None)
+            state["current"] = None
+            clear_suggestion_buttons()
+            suggest_info.configure(text="Yok sayıldı. Başka bir şüpheli kelimeye tıklayın.")
+
+        def rescan():
+            # Eski dinamik tag'leri temizle.
+            for tag in list(state["tags"].keys()):
+                editor.tag_delete(tag)
+            editor.tag_remove("suspect", "1.0", "end")
+            editor.tag_remove("selected_suspect", "1.0", "end")
+            state["tags"] = {}
+            state["current"] = None
+            clear_suggestion_buttons()
+
+            current_text = editor.get("1.0", "end-1c")
+            matches = self.find_suggestions_in_text(current_text)
+            for idx, match in enumerate(matches, start=1):
+                tag = f"suspect_{idx}"
+                start = f"1.0+{match['start']}c"
+                end = f"1.0+{match['end']}c"
+                editor.tag_add("suspect", start, end)
+                editor.tag_add(tag, start, end)
+                editor.tag_bind(tag, "<Button-1>", lambda event, t=tag: select_tag(t))
+                editor.tag_configure(tag, background="#fff2a8", underline=True)
+                state["tags"][tag] = {
+                    "start_index": start,
+                    "end_index": end,
+                    "text": match["text"],
+                    "suggestions": match["suggestions"],
+                }
+            suggest_info.configure(text=f"{len(matches)} şüpheli kelime/ifade işaretlendi." if matches else "Şüpheli kelime bulunmadı.")
+            update_preview()
+
+        def update_preview():
+            txt = editor.get("1.0", "end-1c")
+            preview.delete("1.0", "end")
+            preview.insert("1.0", plain_from_timed_text(txt))
+
+        def save_outputs(close_after: bool = False):
+            txt = editor.get("1.0", "end-1c").strip() + "\n"
+            state["timed_path"].write_text(txt, encoding="utf-8")
+            state["plain_path"].write_text(plain_from_timed_text(txt), encoding="utf-8")
+            self.log(f"Editör kaydetti: {state['timed_path']}")
+            self.log(f"Editör kaydetti: {state['plain_path']}")
+            update_preview()
+            if close_after:
+                win.destroy()
+            else:
+                messagebox.showinfo(APP_NAME, "Düzeltmeler iki temiz çıktı dosyasına kaydedildi.")
+
+        actions = ttk.Frame(win, padding=(12, 0, 12, 12))
+        actions.pack(fill="x")
+        ttk.Button(actions, text="Şüphelileri yeniden tara", command=rescan).pack(side="left")
+        ttk.Button(actions, text="Düz metin önizlemeyi güncelle", command=update_preview).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Kaydet", command=lambda: save_outputs(False)).pack(side="right")
+        ttk.Button(actions, text="Kaydet ve kapat", command=lambda: save_outputs(True)).pack(side="right", padx=(0, 8))
+
+        rescan()
+        editor.focus_set()
+
     def start_job(self):
         if self.is_busy():
             messagebox.showinfo(APP_NAME, "Zaten devam eden bir işlem var.")
@@ -738,10 +969,6 @@ class InstaYaziyaCevirApp(tk.Tk):
             base_name = safe_filename(media_path.stem)
             txt_timed = opts.output_dir / f"{base_name}.zamanli.txt"
             txt_plain = opts.output_dir / f"{base_name}.duz_metin.txt"
-            srt_path = opts.output_dir / f"{base_name}.srt"
-            raw_txt_timed = opts.output_dir / f"{base_name}.ham.zamanli.txt"
-            raw_txt_plain = opts.output_dir / f"{base_name}.ham.duz_metin.txt"
-            raw_srt_path = opts.output_dir / f"{base_name}.ham.srt"
 
             model = self.get_model(opts.model_size)
 
@@ -809,10 +1036,7 @@ class InstaYaziyaCevirApp(tk.Tk):
                 self.log(f"Güvenli bitiş filtresi {len(removed_segments)} şüpheli segmenti ana çıktıdan kaldırdı.")
                 for removed in removed_segments[:5]:
                     self.log(f"Kaldırılan segment: [{format_timestamp(removed.start)} - {format_timestamp(removed.end)}] {removed.text.strip()}")
-                write_txt(raw_txt_timed, raw_segments)
-                write_plain_txt(raw_txt_plain, raw_segments)
-                write_srt(raw_srt_path, raw_segments)
-                self.log(f"Ham çıktı ayrıca kaydedildi: {raw_txt_plain}")
+                self.log("Not: v1.7 ham dosya üretmez; sadece temiz ana çıktılar kaydedilir.")
             else:
                 self.log("Güvenli bitiş filtresi kaldırılacak şüpheli segment bulmadı.")
 
@@ -822,15 +1046,14 @@ class InstaYaziyaCevirApp(tk.Tk):
             self.set_stage("Çıktılar yazılıyor")
             write_txt(txt_timed, segments)
             write_plain_txt(txt_plain, segments)
-            write_srt(srt_path, segments)
 
             self.log("Bitti.")
             self.log(f"Zamanlı TXT: {txt_timed}")
             self.log(f"Düz metin TXT: {txt_plain}")
-            self.log(f"SRT altyazı: {srt_path}")
+            self.log("v1.7: SRT/ham dosya üretilmedi. Düzeltmek için editör açılıyor.")
             self.set_status("Bitti")
             self.after(0, lambda: self._finish_activity("Tamamlandı"))
-            self.after(0, lambda: messagebox.showinfo(APP_NAME, "Yazıya çevirme tamamlandı. Çıktı klasörünü açabilirsin."))
+            self.after(0, lambda: self.open_correction_editor(txt_timed, txt_plain))
         except UserCancelled as exc:
             self.log(str(exc))
             self.set_status("İptal edildi")

@@ -1,25 +1,34 @@
-# Insta Yazıya Çevir v1.6
+# Insta Yazıya Çevir v1.7
 
-Video linkinden veya bilgisayardaki video/ses dosyasından Türkçe metin, zamanlı metin ve SRT altyazı çıkaran macOS uygulaması.
+Video linkinden veya bilgisayardaki video/ses dosyasından Türkçe metin çıkaran macOS uygulaması.
 
-## v1.6 ile gelenler
+## v1.7 yenilikleri
 
-- Instagram linklerinde çerez `Yok` seçiliyken kullanıcıya ön uyarı verir.
-- Kısa `Altyazı M.K.` / altyazı imzası gibi sahte kapanış segmentlerini de temizler.
-- `çeviriyor` gibi normal konuşma kelimelerini yanlışlıkla “çeviri imzası” sanan filtre gevşetildi.
-- İşlem bittiğinde ilerleme çubuğu ve durum alanı artık %100 / kalan 00:00 gösterir.
-- v1.5 özellikleri korundu: YouTube/Instagram link indirme, ffmpeg gerektirmeyen ses/tek dosya indirme, canlı ilerleme, iptal, ilk 1 dakika test modu, model cache.
+- Hızlı düzeltme editörü eklendi.
+- Şüpheli kelime/ifadeler sarı işaretlenir.
+- İşaretli kelimeye tıklayınca öneriler altta görünür.
+- Öneriye tıklayınca metin düzelir.
+- Kaydet dediğinde sadece iki temiz çıktı güncellenir:
+  - `*.zamanli.txt`
+  - `*.duz_metin.txt`
+- Artık varsayılan akışta `ham` dosya ve `srt` dosyası üretilmez.
+- v1.6’daki Instagram çerez uyarısı, kısa altyazı imzası filtresi ve %100 ilerleme düzeltmesi korunur.
 
-## Önerilen kullanım
+## Kullanım
 
-- Kısa ve hızlı test: `small`
-- Kaliteli transkripsiyon: `large-v3`
-- Deneysel hızlı kalite: `turbo`
-- Instagram linkleri için çoğu zaman `Tarayıcı çerezi: Chrome` veya `Safari` seçmek gerekir.
+1. Video linki yapıştır veya dosya seç.
+2. Model seç:
+   - `small`: hızlı taslak
+   - `large-v3`: daha kaliteli sonuç
+   - `turbo`: deneysel hızlı kalite
+3. Instagram linklerinde genellikle Tarayıcı çerezi olarak Chrome/Safari seçmek gerekir.
+4. Yazıya çevir.
+5. İşlem bitince editör açılır.
+6. Sarı işaretli şüpheli kelime/ifadelere tıkla, önerilerden doğru olanı seç.
+7. Kaydet veya Kaydet ve kapat de.
 
 ## GitHub Actions ile build
 
-1. Dosyaları GitHub reposuna yükle.
-2. Actions sekmesinde `Build macOS app` workflow'unu çalıştır.
-3. Artifacts bölümünden DMG dosyasını indir.
-4. DMG'yi açıp uygulamayı Applications klasörüne sürükle.
+Actions > Build macOS app > Run workflow
+
+Çıktıdan `InstaYaziyaCevir-macOS-dmg` indir.
