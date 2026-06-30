@@ -1,6 +1,7 @@
 import gc
 import inspect
 import os
+import sys
 import unicodedata
 import queue
 import re
@@ -19,10 +20,18 @@ import yt_dlp
 from faster_whisper import WhisperModel
 
 
-APP_NAME = "Insta Yazıya Çevir"
-APP_VERSION = "1.7.0"
-DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "InstaYaziyaCevir"
+APP_NAME = "Zelka Scribe"
+APP_VERSION = "2.0.0"
+DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "Zelka Scribe"
 
+
+def resource_path(relative_path: str) -> Path:
+    """PyInstaller bundle içinde ve kaynak repo içinde asset bulur."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+    candidate = base / relative_path
+    if candidate.exists():
+        return candidate
+    return Path(__file__).resolve().parents[1] / relative_path
 
 @dataclass
 class JobOptions:
@@ -393,129 +402,210 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.after(250, self._update_elapsed)
 
     def _build_ui(self):
-        pad = 14
-        root = ttk.Frame(self, padding=pad)
+        # Zelka Scribe v2.0 arayüzü: çalışan motor korunur, sadece ürünleşmiş UI uygulanır.
+        self.configure(bg="#F4F1EB")
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        self.ui_bg = "#F4F1EB"
+        self.card_bg = "#FBF9F4"
+        self.ink = "#11131A"
+        self.muted = "#626873"
+        self.line = "#D9D2C5"
+        self.gold = "#EAD39A"
+
+        style.configure("ZS.TFrame", background=self.ui_bg)
+        style.configure("ZS.Card.TFrame", background=self.card_bg, relief="solid", borderwidth=1)
+        style.configure("ZS.TLabel", background=self.ui_bg, foreground=self.ink, font=("Arial", 12))
+        style.configure("ZS.Muted.TLabel", background=self.ui_bg, foreground=self.muted, font=("Arial", 11))
+        style.configure("ZS.Card.TLabel", background=self.card_bg, foreground=self.ink, font=("Arial", 11))
+        style.configure("ZS.Section.TLabel", background=self.ui_bg, foreground=self.ink, font=("Arial", 9, "bold"))
+        style.configure("ZS.Title.TLabel", background=self.ui_bg, foreground=self.ink, font=("Arial", 24, "bold"))
+        style.configure("ZS.Subtitle.TLabel", background=self.ui_bg, foreground=self.muted, font=("Arial", 14))
+        style.configure("ZS.TButton", font=("Arial", 11), padding=(14, 8))
+        style.configure("ZS.Primary.TButton", font=("Arial", 12, "bold"), padding=(18, 10), background=self.ink, foreground="#FFFFFF")
+        style.map("ZS.Primary.TButton", background=[("active", "#2B3038")], foreground=[("active", "#FFFFFF")])
+        style.configure("ZS.TEntry", padding=8, fieldbackground="#FFFFFF", foreground=self.ink)
+        style.configure("ZS.TCombobox", padding=6, fieldbackground="#FFFFFF", foreground=self.ink)
+        style.configure("ZS.Horizontal.TProgressbar", troughcolor="#E6DFD4", background=self.ink, bordercolor="#E6DFD4")
+
+        self.geometry("1280x760")
+        self.minsize(1120, 700)
+
+        root = tk.Frame(self, bg=self.ui_bg, padx=28, pady=24)
         root.pack(fill="both", expand=True)
+        root.columnconfigure(0, weight=0, minsize=430)
+        root.columnconfigure(1, weight=1)
+        root.rowconfigure(0, weight=1)
 
-        title = ttk.Label(root, text="Videoyu yazıya çevir", font=("Arial", 20, "bold"))
-        title.pack(anchor="w")
+        left = tk.Frame(root, bg=self.ui_bg)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 34))
+        right = tk.Frame(root, bg=self.ui_bg)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.rowconfigure(1, weight=1)
+        right.columnconfigure(0, weight=1)
 
-        desc = ttk.Label(
-            root,
-            text=(
-                "Video linki yapıştır veya bilgisayardan video/ses dosyası seç. "
-                "v1.7: hızlı düzeltme editörü, şüpheli kelime önerileri ve yalnızca iki temiz çıktı eklendi."
-            ),
-            wraplength=900,
-        )
-        desc.pack(anchor="w", pady=(4, 16))
+        # Marka alanı
+        brand = tk.Frame(left, bg=self.ui_bg)
+        brand.pack(fill="x", pady=(0, 22))
+        self.logo_photo = None
+        logo_path = resource_path("assets/Zelka_scribe_yatay.png")
+        try:
+            self.logo_photo = tk.PhotoImage(file=str(logo_path))
+            tk.Label(brand, image=self.logo_photo, bg=self.ui_bg).pack(anchor="w")
+        except Exception:
+            ttk.Label(brand, text="ZELKA LABS", style="ZS.Title.TLabel").pack(anchor="w")
 
-        url_frame = ttk.LabelFrame(root, text="1) Video linki")
-        url_frame.pack(fill="x", pady=(0, 10))
-        ttk.Entry(url_frame, textvariable=self.url_var).pack(side="left", fill="x", expand=True, padx=10, pady=10)
-        ttk.Button(url_frame, text="Temizle", command=lambda: self.url_var.set("")).pack(side="left", padx=(0, 10))
+        ttk.Label(left, text="Zelka Scribe", style="ZS.Title.TLabel").pack(anchor="w")
+        ttk.Label(left, text="Video to Text Converter", style="ZS.Subtitle.TLabel").pack(anchor="w", pady=(2, 24))
 
-        file_frame = ttk.LabelFrame(root, text="Alternatif: Bilgisayardan dosya seç")
-        file_frame.pack(fill="x", pady=(0, 10))
-        ttk.Entry(file_frame, textvariable=self.selected_file).pack(side="left", fill="x", expand=True, padx=10, pady=10)
-        ttk.Button(file_frame, text="Dosya seç", command=self.choose_file).pack(side="left", padx=(0, 8))
-        ttk.Button(file_frame, text="Temizle", command=lambda: self.selected_file.set("")).pack(side="left", padx=(0, 10))
+        def section_title(parent, text):
+            lbl = ttk.Label(parent, text=text.upper(), style="ZS.Section.TLabel")
+            lbl.pack(anchor="w", pady=(0, 6))
+            return lbl
 
-        options = ttk.LabelFrame(root, text="2) Ayarlar")
-        options.pack(fill="x", pady=(0, 10))
+        def card(parent, pad=12):
+            f = tk.Frame(parent, bg=self.card_bg, highlightthickness=1, highlightbackground=self.line, padx=pad, pady=pad)
+            f.pack(fill="x", pady=(0, 14))
+            return f
 
-        row = ttk.Frame(options)
-        row.pack(fill="x", padx=10, pady=10)
+        # Input kartı
+        section_title(left, "Input")
+        input_card = card(left)
+        ttk.Label(input_card, text="1. Video Link", style="ZS.Card.TLabel", font=("Arial", 11, "bold")).pack(anchor="w")
+        link_row = tk.Frame(input_card, bg=self.card_bg)
+        link_row.pack(fill="x", pady=(6, 12))
+        link_row.columnconfigure(0, weight=1)
+        ttk.Entry(link_row, textvariable=self.url_var, style="ZS.TEntry").grid(row=0, column=0, sticky="ew")
+        ttk.Button(link_row, text="Temizle", style="ZS.TButton", command=lambda: self.url_var.set("")).grid(row=0, column=1, padx=(8, 0))
 
-        ttk.Label(row, text="Model:").grid(row=0, column=0, sticky="w")
-        model_box = ttk.Combobox(
-            row,
-            textvariable=self.model_var,
-            values=["tiny", "base", "small", "medium", "large-v3", "turbo"],
-            width=12,
-            state="readonly",
-        )
-        model_box.grid(row=0, column=1, padx=(8, 24), sticky="w")
+        ttk.Label(input_card, text="2. Upload Video / Audio File", style="ZS.Card.TLabel", font=("Arial", 11, "bold")).pack(anchor="w")
+        file_box = tk.Frame(input_card, bg="#FFFDF8", highlightthickness=1, highlightbackground="#CFC7BA", padx=14, pady=12)
+        file_box.pack(fill="x", pady=(6, 6))
+        file_box.columnconfigure(0, weight=1)
+        ttk.Entry(file_box, textvariable=self.selected_file, style="ZS.TEntry").grid(row=0, column=0, sticky="ew", pady=(0, 8), columnspan=2)
+        ttk.Button(file_box, text="Dosya seç", style="ZS.TButton", command=self.choose_file).grid(row=1, column=0, sticky="w")
+        ttk.Button(file_box, text="Temizle", style="ZS.TButton", command=lambda: self.selected_file.set("")).grid(row=1, column=1, sticky="e")
+        tk.Label(input_card, text="Supported formats: MP4, MOV, MKV, AVI, MP3, M4A, WAV", bg=self.card_bg, fg=self.muted, font=("Arial", 9)).pack(anchor="w", pady=(2, 0))
+
+        # Settings kartı
+        section_title(left, "Settings")
+        settings_card = card(left)
+        for i in range(2):
+            settings_card.columnconfigure(i, weight=1)
+
+        def settings_row(row, label, widget):
+            tk.Label(settings_card, text=label, bg=self.card_bg, fg=self.ink, font=("Arial", 11)).grid(row=row, column=0, sticky="w", pady=5)
+            widget.grid(row=row, column=1, sticky="ew", pady=5, padx=(12, 0))
+
+        model_box = ttk.Combobox(settings_card, textvariable=self.model_var, values=["tiny", "base", "small", "medium", "large-v3", "turbo"], state="readonly", style="ZS.TCombobox")
         model_box.bind("<<ComboboxSelected>>", self.on_model_changed)
+        settings_row(0, "Model", model_box)
+        lang_box = ttk.Combobox(settings_card, textvariable=self.language_var, values=["tr", "auto", "en", "de", "fr", "es", "it", "ar"], state="readonly", style="ZS.TCombobox")
+        settings_row(1, "Language", lang_box)
+        cookies_box = ttk.Combobox(settings_card, textvariable=self.cookies_var, values=["Yok", "Chrome", "Safari", "Firefox", "Edge"], state="readonly", style="ZS.TCombobox")
+        settings_row(2, "Browser Cookies", cookies_box)
+        out_row = tk.Frame(settings_card, bg=self.card_bg)
+        out_row.columnconfigure(0, weight=1)
+        ttk.Entry(out_row, textvariable=self.output_var, style="ZS.TEntry").grid(row=0, column=0, sticky="ew")
+        ttk.Button(out_row, text="Browse...", style="ZS.TButton", command=self.choose_output).grid(row=0, column=1, padx=(8, 0))
+        settings_row(3, "Output Folder", out_row)
 
-        ttk.Label(row, text="Dil:").grid(row=0, column=2, sticky="w")
-        lang_box = ttk.Combobox(
-            row,
-            textvariable=self.language_var,
-            values=["tr", "auto", "en", "de", "fr", "es", "it", "ar"],
-            width=10,
-            state="readonly",
-        )
-        lang_box.grid(row=0, column=3, padx=(8, 24), sticky="w")
+        test = ttk.Checkbutton(settings_card, text="Sadece ilk 1 dakikayı test et", variable=self.test_first_minute_var)
+        test.grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        tk.Label(settings_card, textvariable=self.model_hint_var, bg=self.card_bg, fg=self.muted, font=("Arial", 9), wraplength=380, justify="left").grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-        ttk.Label(row, text="Tarayıcı çerezi:").grid(row=0, column=4, sticky="w")
-        cookies_box = ttk.Combobox(
-            row,
-            textvariable=self.cookies_var,
-            values=["Yok", "Chrome", "Safari", "Firefox", "Edge"],
-            width=12,
-            state="readonly",
-        )
-        cookies_box.grid(row=0, column=5, padx=(8, 0), sticky="w")
+        # Processing kartı
+        section_title(left, "Processing Status")
+        progress_card = card(left)
+        status_top = tk.Frame(progress_card, bg=self.card_bg)
+        status_top.pack(fill="x")
+        tk.Label(status_top, textvariable=self.status_var, bg=self.card_bg, fg=self.ink, font=("Arial", 14, "bold")).pack(side="left")
+        self.percent_label = tk.Label(status_top, text="0%", bg=self.card_bg, fg=self.ink, font=("Arial", 20, "bold"))
+        self.percent_label.pack(side="right")
+        self.progress = ttk.Progressbar(progress_card, mode="determinate", maximum=100, variable=self.progress_value, style="ZS.Horizontal.TProgressbar")
+        self.progress.pack(fill="x", pady=(10, 12))
+        detail = tk.Frame(progress_card, bg=self.card_bg)
+        detail.pack(fill="x")
+        tk.Label(detail, textvariable=self.elapsed_var, bg=self.card_bg, fg=self.muted, font=("Arial", 10)).pack(side="left")
+        tk.Label(detail, textvariable=self.progress_detail_var, bg=self.card_bg, fg=self.muted, font=("Arial", 10)).pack(side="left", padx=(20, 0))
+        tk.Label(detail, textvariable=self.eta_var, bg=self.card_bg, fg=self.muted, font=("Arial", 10)).pack(side="right")
+        tk.Label(progress_card, textvariable=self.last_segment_var, bg=self.card_bg, fg=self.muted, font=("Arial", 9), wraplength=390, justify="left").pack(anchor="w", pady=(8, 0))
+        tk.Label(progress_card, textvariable=self.loaded_model_var, bg=self.card_bg, fg=self.muted, font=("Arial", 9)).pack(anchor="w", pady=(4, 0))
 
-        hint = ttk.Label(options, textvariable=self.model_hint_var, wraplength=900)
-        hint.pack(anchor="w", padx=10, pady=(0, 8))
-
-        test_row = ttk.Frame(options)
-        test_row.pack(fill="x", padx=10, pady=(0, 8))
-        ttk.Checkbutton(
-            test_row,
-            text="Sadece ilk 1 dakikayı test et",
-            variable=self.test_first_minute_var,
-        ).pack(side="left")
-        ttk.Label(test_row, text="Uzun linklerde hızlı deneme için kullan.").pack(side="left", padx=(10, 0))
-
-        out_frame = ttk.Frame(options)
-        out_frame.pack(fill="x", padx=10, pady=(0, 10))
-        ttk.Label(out_frame, text="Çıktı klasörü:").pack(side="left")
-        ttk.Entry(out_frame, textvariable=self.output_var).pack(side="left", fill="x", expand=True, padx=8)
-        ttk.Button(out_frame, text="Klasör seç", command=self.choose_output).pack(side="left")
-
-        progress_frame = ttk.LabelFrame(root, text="İşlem durumu")
-        progress_frame.pack(fill="x", pady=(0, 10))
-        top_status = ttk.Frame(progress_frame)
-        top_status.pack(fill="x", padx=10, pady=(10, 6))
-        ttk.Label(top_status, textvariable=self.stage_var).pack(side="left")
-        ttk.Label(top_status, textvariable=self.elapsed_var).pack(side="right")
-        self.progress = ttk.Progressbar(progress_frame, mode="determinate", maximum=100, variable=self.progress_value)
-        self.progress.pack(fill="x", padx=10, pady=(0, 6))
-        detail_row = ttk.Frame(progress_frame)
-        detail_row.pack(fill="x", padx=10, pady=(0, 4))
-        ttk.Label(detail_row, textvariable=self.progress_detail_var).pack(side="left")
-        ttk.Label(detail_row, textvariable=self.eta_var).pack(side="right")
-        ttk.Label(progress_frame, textvariable=self.last_segment_var, wraplength=900).pack(anchor="w", padx=10, pady=(0, 6))
-        ttk.Label(progress_frame, textvariable=self.loaded_model_var).pack(anchor="w", padx=10, pady=(0, 10))
-
-        buttons = ttk.Frame(root)
-        buttons.pack(fill="x", pady=(0, 10))
-        self.start_button = ttk.Button(buttons, text="Yazıya çevir", command=self.start_job)
+        # Sol alt action bar
+        actions = tk.Frame(left, bg=self.ui_bg)
+        actions.pack(fill="x", pady=(4, 0))
+        self.start_button = ttk.Button(actions, text="▷  Convert", style="ZS.Primary.TButton", command=self.start_job)
         self.start_button.pack(side="left")
-        self.cancel_button = ttk.Button(buttons, text="İptal", command=self.cancel_job, state="disabled")
+        self.cancel_button = ttk.Button(actions, text="İptal", style="ZS.TButton", command=self.cancel_job, state="disabled")
         self.cancel_button.pack(side="left", padx=(8, 0))
-        self.preload_button = ttk.Button(buttons, text="Seçili modeli hazırla", command=self.preload_selected_model)
+        self.preload_button = ttk.Button(actions, text="Prepare Model", style="ZS.TButton", command=self.preload_selected_model)
         self.preload_button.pack(side="left", padx=(8, 0))
-        ttk.Button(buttons, text="Çıktı klasörünü aç", command=self.open_output_dir).pack(side="left", padx=8)
-        ttk.Button(buttons, text="Modeli RAM'den temizle", command=self.unload_model).pack(side="left")
-        ttk.Label(buttons, textvariable=self.status_var).pack(side="right")
+        ttk.Button(actions, text="Open Output Folder", style="ZS.TButton", command=self.open_output_dir).pack(side="left", padx=(8, 0))
 
-        log_frame = ttk.LabelFrame(root, text="Durum kaydı")
-        log_frame.pack(fill="both", expand=True)
-        self.log_text = tk.Text(log_frame, wrap="word", height=18)
-        self.log_text.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
-        scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
-        scroll.pack(side="right", fill="y", padx=(0, 10), pady=10)
+        # Sağ: editör önizleme / log
+        top_right = tk.Frame(right, bg=self.ui_bg)
+        top_right.grid(row=0, column=0, sticky="ew")
+        ttk.Label(top_right, text="TRANSCRIPT EDITOR", style="ZS.Section.TLabel").pack(anchor="w", pady=(0, 8))
+
+        editor_card = tk.Frame(right, bg=self.card_bg, highlightthickness=1, highlightbackground=self.line)
+        editor_card.grid(row=1, column=0, sticky="nsew")
+        editor_card.rowconfigure(1, weight=1)
+        editor_card.columnconfigure(0, weight=1)
+
+        toolbar = tk.Frame(editor_card, bg="#FFFDF8", padx=12, pady=8, highlightthickness=0)
+        toolbar.grid(row=0, column=0, sticky="ew")
+        tk.Label(toolbar, text="Paragraph", bg="#FFFDF8", fg=self.muted, font=("Arial", 10)).pack(side="left")
+        tk.Label(toolbar, text="   B   I   U     ≡   ≡   ↶  ↷", bg="#FFFDF8", fg=self.ink, font=("Arial", 11)).pack(side="left", padx=(24, 0))
+        tk.Label(toolbar, text="⋯", bg="#FFFDF8", fg=self.ink, font=("Arial", 16)).pack(side="right")
+
+        self.preview_editor = tk.Text(editor_card, wrap="word", bg="#FFFDF8", fg=self.ink, relief="flat", padx=18, pady=14, font=("Arial", 12), height=16)
+        self.preview_editor.grid(row=1, column=0, sticky="nsew")
+        self.preview_editor.insert("1.0", "00:00:00    Hazır. Video linki gir veya dosya seç.\n\n00:00:04    Çeviri tamamlanınca düzeltme editörü otomatik açılır.\n\n00:00:08    Şüpheli kelimeler okunur sarı vurguyla işaretlenir.\n\n00:00:12    Kaydettiğinde yalnızca iki temiz çıktı güncellenir: zamanlı metin ve düz metin.")
+        self.preview_editor.tag_configure("suspect_demo", background=self.gold, foreground=self.ink)
+        try:
+            self.preview_editor.tag_add("suspect_demo", "5.22", "5.31")
+        except Exception:
+            pass
+        self.preview_editor.configure(state="disabled")
+
+        summary = tk.Frame(editor_card, bg="#FFFDF8", padx=14, pady=8, highlightthickness=1, highlightbackground="#EEE7DC")
+        summary.grid(row=2, column=0, sticky="ew")
+        tk.Label(summary, text="Total Duration: -", bg="#FFFDF8", fg=self.muted, font=("Arial", 9)).pack(side="left")
+        tk.Label(summary, text="Suspicious words: editor içinde gösterilir", bg="#FFFDF8", fg=self.muted, font=("Arial", 9)).pack(side="right")
+
+        suggestions = tk.Frame(right, bg=self.card_bg, highlightthickness=1, highlightbackground=self.line, padx=12, pady=10)
+        suggestions.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        ttk.Label(suggestions, text="SUSPICIOUS WORDS & SUGGESTIONS", style="ZS.Card.TLabel", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        for word, vals in [("Simply", ["Just", "Basically", "Only"]), ("Challenging", ["Difficult", "Demanding", "Complex"]), ("Suspicious", ["Questionable", "Unusual", "Doubtful"])]:
+            row = tk.Frame(suggestions, bg=self.card_bg)
+            row.pack(fill="x", pady=3)
+            tk.Label(row, text=word, bg=self.gold, fg=self.ink, font=("Arial", 10, "bold"), width=13, anchor="w", padx=8).pack(side="left")
+            for v in vals:
+                tk.Label(row, text=v, bg="#FFFDF8", fg=self.ink, font=("Arial", 9), padx=8, pady=4, highlightthickness=1, highlightbackground="#E3DCCF").pack(side="left", padx=(8, 0))
+            ttk.Button(row, text="Replace", style="ZS.TButton").pack(side="right")
+
+        # Durum kaydı küçük ve sağ altta tutulur; motor logları aynen korunur.
+        log_frame = tk.Frame(right, bg=self.card_bg, highlightthickness=1, highlightbackground=self.line, padx=10, pady=8)
+        log_frame.grid(row=3, column=0, sticky="nsew", pady=(14, 0))
+        ttk.Label(log_frame, text="DURUM KAYDI", style="ZS.Card.TLabel", font=("Arial", 10, "bold")).pack(anchor="w")
+        log_inner = tk.Frame(log_frame, bg=self.card_bg)
+        log_inner.pack(fill="both", expand=True, pady=(6, 0))
+        self.log_text = tk.Text(log_inner, wrap="word", height=7, bg="#11131A", fg="#F4F1EB", insertbackground="#F4F1EB", relief="flat", padx=10, pady=10, font=("Menlo", 10))
+        self.log_text.pack(side="left", fill="both", expand=True)
+        scroll = ttk.Scrollbar(log_inner, command=self.log_text.yview)
+        scroll.pack(side="right", fill="y")
         self.log_text.configure(yscrollcommand=scroll.set)
 
         self.log("Hazır. Video linki gir veya dosya seç.")
         self.log("Not: Aynı oturumda aynı model tekrar yüklenmez; ikinci video daha hızlı başlar.")
         self.log("Not: large-v3 ve turbo ilk kullanımda indirilebilir/yüklenebilir; sayaçtan bekleme süresini takip edebilirsin.")
-        self.log("Not: v1.6 işlem bittiğinde ilerleme %100/kalan 00:00 gösterir; kısa sahte altyazı imzalarını da temizler.")
-        self.log("Not: Linkten indirirken ffmpeg merge istemez; YouTube/Instagram linklerini tek dosya/ses olarak dener.")
+        self.log("Not: Zelka Scribe v2.0 marka arayüzü eklendi; transkripsiyon motoru korunur.")
+        self.log("Not: Sadece iki temiz çıktı üretilir: *.zamanli.txt ve *.duz_metin.txt.")
 
     def on_model_changed(self, _event=None):
         model = self.model_var.get()
@@ -604,6 +694,8 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.progress.configure(mode="determinate")
         if stage == "Tamamlandı":
             self.progress_value.set(100)
+            if hasattr(self, "percent_label"):
+                self.percent_label.configure(text="100%")
             total = self.current_progress_total or 0
             if total > 0:
                 self.progress_detail_var.set(
@@ -620,7 +712,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.after(0, lambda: (self.progress.configure(mode="indeterminate"), self.progress.start(12)))
 
     def start_determinate_progress(self):
-        self.after(0, lambda: (self.progress.stop(), self.progress.configure(mode="determinate"), self.progress_value.set(0)))
+        self.after(0, lambda: (self.progress.stop(), self.progress.configure(mode="determinate"), self.progress_value.set(0), hasattr(self, "percent_label") and self.percent_label.configure(text="0%")))
 
     def _update_elapsed(self):
         if self.activity_running and self.activity_start_time is not None:
@@ -658,6 +750,8 @@ class InstaYaziyaCevirApp(tk.Tk):
                 self.current_progress_total = float(total)
                 percent = max(0.0, min(100.0, (processed / total) * 100.0))
                 self.progress_value.set(percent)
+                if hasattr(self, "percent_label"):
+                    self.percent_label.configure(text=format_percent(percent))
                 self.progress_detail_var.set(
                     f"İşlenen: {format_elapsed(processed)} / {format_elapsed(total)} ({format_percent(percent)})"
                 )
@@ -720,7 +814,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             return
 
         win = tk.Toplevel(self)
-        win.title("Metin Düzeltme Editörü")
+        win.title("Zelka Scribe — Transcript Editor")
         win.geometry("1050x760")
         win.minsize(850, 600)
         win.transient(self)
@@ -729,7 +823,7 @@ class InstaYaziyaCevirApp(tk.Tk):
 
         header = ttk.Frame(win, padding=(12, 10))
         header.pack(fill="x")
-        ttk.Label(header, text="Metin Düzeltme Editörü", font=("Arial", 16, "bold")).pack(side="left")
+        ttk.Label(header, text="Transcript Editor", font=("Arial", 16, "bold")).pack(side="left")
         ttk.Label(header, text="Sarı işaretli şüpheli kelime/ifadeye tıkla, alttan öneriyi seç.").pack(side="left", padx=(14, 0))
 
         main = ttk.Frame(win, padding=(12, 0, 12, 8))
@@ -743,8 +837,8 @@ class InstaYaziyaCevirApp(tk.Tk):
         scroll.pack(side="right", fill="y", padx=(0, 8), pady=8)
         editor.configure(yscrollcommand=scroll.set)
         editor.insert("1.0", timed_text)
-        editor.tag_configure("suspect", background="#fff2a8", underline=True)
-        editor.tag_configure("selected_suspect", background="#ffd36b", underline=True)
+        editor.tag_configure("suspect", background="#EAD39A", foreground="#11131A", underline=False)
+        editor.tag_configure("selected_suspect", background="#11131A", foreground="#FFFFFF", underline=False)
 
         suggest_frame = ttk.LabelFrame(main, text="Öneriler")
         suggest_frame.pack(fill="x", pady=(8, 0))
@@ -818,7 +912,7 @@ class InstaYaziyaCevirApp(tk.Tk):
                 editor.tag_add("suspect", start, end)
                 editor.tag_add(tag, start, end)
                 editor.tag_bind(tag, "<Button-1>", lambda event, t=tag: select_tag(t))
-                editor.tag_configure(tag, background="#fff2a8", underline=True)
+                editor.tag_configure(tag, background="#EAD39A", foreground="#11131A", underline=False)
                 state["tags"][tag] = {
                     "start_index": start,
                     "end_index": end,

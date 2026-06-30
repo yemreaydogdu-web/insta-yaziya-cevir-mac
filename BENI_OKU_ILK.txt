@@ -1,15 +1,20 @@
-MAC KULLANIYORSAN HEDEF DOSYA .EXE DEĞİL, .APP / .DMG'DİR.
+ZELKA SCRIBE v2.0
 
-v1.7 ana değişiklik:
-- İşlem sonrası hızlı düzeltme editörü açılır.
-- Şüpheli kelimeler sarı işaretlenir.
-- Tıklayınca öneriler çıkar, doğru olanı seçebilirsin.
-- Sadece iki temiz çıktı üretilir:
-  1) zamanli.txt
-  2) duz_metin.txt
+Bu repo, çalışan Insta Yazıya Çevir motorunun Zelka Scribe ürün kimliğine taşınmış halidir.
 
-GitHub'da build almak için:
-1) Dosyaları repoya yükle.
-2) Commit changes de.
-3) Actions > Build macOS app > Run workflow.
-4) Artifacts bölümünden macOS-dmg dosyasını indir.
+ÖNEMLİ:
+- Transkripsiyon motoru, model seçimi, link indirme ve çıktı alma mantığı korunmuştur.
+- Yeni arayüz, logo, app icon ve macOS build isimleri güncellenmiştir.
+- Normal çıktı olarak yalnızca iki dosya üretilir:
+  1) *.zamanli.txt
+  2) *.duz_metin.txt
+
+MAC BUILD:
+- GitHub Actions otomatik çalışır.
+- Elle build için: bash build_macos.sh
+
+ÇIKTILAR:
+- dist/Zelka Scribe.app
+- dist/ZelkaScribe.dmg
+
+Instagram linklerinde hata olursa Chrome/Safari çerezi seçilmeli ve tarayıcıda ilgili hesap açık olmalıdır.

@@ -1,34 +1,55 @@
-# Insta Yazıya Çevir v1.7
+# Zelka Scribe v2.0
 
-Video linkinden veya bilgisayardaki video/ses dosyasından Türkçe metin çıkaran macOS uygulaması.
+Zelka Labs çatısı altında hazırlanan macOS video/ses yazıya çevirme uygulaması.
 
-## v1.7 yenilikleri
+**Product:** Zelka Scribe  
+**Descriptor:** Video to Text Converter
 
-- Hızlı düzeltme editörü eklendi.
-- Şüpheli kelime/ifadeler sarı işaretlenir.
-- İşaretli kelimeye tıklayınca öneriler altta görünür.
-- Öneriye tıklayınca metin düzelir.
-- Kaydet dediğinde sadece iki temiz çıktı güncellenir:
+## v2.0 yenilikleri
+
+- Zelka Scribe marka arayüzü eklendi.
+- Program içi yatay logo ve app icon assetleri eklendi.
+- Uygulama adı, DMG adı ve GitHub Actions artifact adları Zelka Scribe olarak güncellendi.
+- Çalışan transkripsiyon motoru korunur:
+  - yerel video/ses dosyası seçme,
+  - YouTube/Instagram ve benzeri linklerden indirme,
+  - Chrome/Safari/Firefox/Edge çerezi seçme,
+  - small / medium / large-v3 / turbo model seçimi,
+  - ilk 1 dakika test modu,
+  - canlı işlem yüzdesi, geçen süre ve tahmini kalan süre,
+  - iptal butonu,
+  - model cache / RAM temizleme.
+- Çıktı sistemi sadeleştirildi: normal kullanımda yalnızca iki temiz dosya üretilir:
   - `*.zamanli.txt`
   - `*.duz_metin.txt`
-- Artık varsayılan akışta `ham` dosya ve `srt` dosyası üretilmez.
-- v1.6’daki Instagram çerez uyarısı, kısa altyazı imzası filtresi ve %100 ilerleme düzeltmesi korunur.
+- Hızlı düzeltme editörü korunur; şüpheli kelimeler işaretlenir ve önerilerden düzeltilebilir.
 
 ## Kullanım
 
-1. Video linki yapıştır veya dosya seç.
+1. Video linki yapıştır veya bilgisayardan video/ses dosyası seç.
 2. Model seç:
-   - `small`: hızlı taslak
-   - `large-v3`: daha kaliteli sonuç
-   - `turbo`: deneysel hızlı kalite
-3. Instagram linklerinde genellikle Tarayıcı çerezi olarak Chrome/Safari seçmek gerekir.
-4. Yazıya çevir.
-5. İşlem bitince editör açılır.
-6. Sarı işaretli şüpheli kelime/ifadelere tıkla, önerilerden doğru olanı seç.
-7. Kaydet veya Kaydet ve kapat de.
+   - `small`: hızlı günlük kullanım
+   - `large-v3`: kalite modu
+   - `turbo`: hızlı kalite denemesi
+3. Gerekirse tarayıcı çerezi seç. Instagram linkleri çoğunlukla Chrome/Safari çerezi isteyebilir.
+4. `Convert` butonuna bas.
+5. İşlem bitince editör açılır; gerekirse düzeltmeleri yapıp kaydet.
 
-## GitHub Actions ile build
+## macOS build
 
-Actions > Build macOS app > Run workflow
+GitHub Actions otomatik build alır. Elle build için:
 
-Çıktıdan `InstaYaziyaCevir-macOS-dmg` indir.
+```bash
+bash build_macos.sh
+```
+
+Çıktılar:
+
+```text
+dist/Zelka Scribe.app
+dist/ZelkaScribe.dmg
+```
+
+## Not
+
+Bu sürümde amaç çalışan motoru bozmadan ürünü Zelka Scribe kimliğine taşımaktır. Transkripsiyon, indirme ve model ayarlarının temel mantığı v1.7'den korunmuştur.

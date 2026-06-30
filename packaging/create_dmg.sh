@@ -3,9 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
-APP_PATH="$DIST_DIR/InstaYaziyaCevir.app"
+APP_PATH="$DIST_DIR/Zelka Scribe.app"
 DMG_ROOT="$DIST_DIR/dmgroot"
-DMG_PATH="$DIST_DIR/InstaYaziyaCevir.dmg"
+DMG_PATH="$DIST_DIR/ZelkaScribe.dmg"
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Hata: $APP_PATH bulunamadı. Önce build_macos.sh çalıştırılmalı."
@@ -18,7 +18,7 @@ cp -R "$APP_PATH" "$DMG_ROOT/"
 ln -s /Applications "$DMG_ROOT/Applications"
 
 hdiutil create \
-  -volname "InstaYaziyaCevir" \
+  -volname "Zelka Scribe" \
   -srcfolder "$DMG_ROOT" \
   -ov \
   -format UDZO \
