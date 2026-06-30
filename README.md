@@ -1,11 +1,11 @@
-# Zelka Scribe v2.0
+# Zelka Scribe v2.0.1
 
-Zelka Labs çatısı altında hazırlanan macOS video/ses yazıya çevirme uygulaması.
+Zelka Labs çatısı altında hazırlanan macOS ve Windows video/ses yazıya çevirme uygulaması.
 
 **Product:** Zelka Scribe  
 **Descriptor:** Video to Text Converter
 
-## v2.0 yenilikleri
+## v2.0.1 yenilikleri
 
 - Zelka Scribe marka arayüzü eklendi.
 - Program içi yatay logo ve app icon assetleri eklendi.
@@ -48,6 +48,33 @@ bash build_macos.sh
 ```text
 dist/Zelka Scribe.app
 dist/ZelkaScribe.dmg
+```
+
+
+## Windows build
+
+GitHub Actions üzerinden Windows çıktısı almak için `Actions > Build Windows app > Run workflow` kullan. Elle build için Windows bilgisayarda:
+
+```powershell
+.\build_windows.ps1
+```
+
+veya çift tıklayarak:
+
+```text
+build_windows.bat
+```
+
+Çıktı:
+
+```text
+dist\Zelka Scribe\Zelka Scribe.exe
+```
+
+GitHub Actions artifact adı:
+
+```text
+ZelkaScribe-Windows-app
 ```
 
 ## Not

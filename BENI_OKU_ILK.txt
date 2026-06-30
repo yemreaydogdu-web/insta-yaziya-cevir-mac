@@ -1,4 +1,4 @@
-ZELKA SCRIBE v2.0
+ZELKA SCRIBE v2.0.1
 
 Bu repo, çalışan Insta Yazıya Çevir motorunun Zelka Scribe ürün kimliğine taşınmış halidir.
 
@@ -18,3 +18,17 @@ MAC BUILD:
 - dist/ZelkaScribe.dmg
 
 Instagram linklerinde hata olursa Chrome/Safari çerezi seçilmeli ve tarayıcıda ilgili hesap açık olmalıdır.
+
+
+WINDOWS BUILD
+-------------
+GitHub'da Actions sekmesinden "Build Windows app" workflow'unu çalıştır.
+Çıktı artifact adı: ZelkaScribe-Windows-app
+
+Yerel Windows build için:
+  build_windows.bat
+veya PowerShell ile:
+  .\build_windows.ps1
+
+Çıktı klasörü:
+  dist\Zelka Scribe\Zelka Scribe.exe

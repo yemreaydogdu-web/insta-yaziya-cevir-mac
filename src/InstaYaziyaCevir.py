@@ -21,7 +21,7 @@ from faster_whisper import WhisperModel
 
 
 APP_NAME = "Zelka Scribe"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "Zelka Scribe"
 
 
@@ -370,6 +370,15 @@ class InstaYaziyaCevirApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"{APP_NAME} v{APP_VERSION}")
+        try:
+            if sys.platform.startswith("win"):
+                self.iconbitmap(str(resource_path("assets/ZelkaScribe.ico")))
+            else:
+                icon_img = tk.PhotoImage(file=str(resource_path("assets/app_icon_1024_transparent.png")))
+                self.iconphoto(True, icon_img)
+                self._app_icon_photo = icon_img
+        except Exception:
+            pass
         self.geometry("950x760")
         self.minsize(800, 660)
         self.log_queue: queue.Queue[str] = queue.Queue()
@@ -402,7 +411,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.after(250, self._update_elapsed)
 
     def _build_ui(self):
-        # Zelka Scribe v2.0 arayüzü: çalışan motor korunur, sadece ürünleşmiş UI uygulanır.
+        # Zelka Scribe v2.0.1 arayüzü: çalışan motor korunur, aksiyon butonları görünür hale getirildi.
         self.configure(bg="#F4F1EB")
         style = ttk.Style(self)
         try:
@@ -432,8 +441,8 @@ class InstaYaziyaCevirApp(tk.Tk):
         style.configure("ZS.TCombobox", padding=6, fieldbackground="#FFFFFF", foreground=self.ink)
         style.configure("ZS.Horizontal.TProgressbar", troughcolor="#E6DFD4", background=self.ink, bordercolor="#E6DFD4")
 
-        self.geometry("1280x760")
-        self.minsize(1120, 700)
+        self.geometry("1280x790")
+        self.minsize(1120, 720)
 
         root = tk.Frame(self, bg=self.ui_bg, padx=28, pady=24)
         root.pack(fill="both", expand=True)
@@ -454,13 +463,16 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.logo_photo = None
         logo_path = resource_path("assets/Zelka_scribe_yatay.png")
         try:
-            self.logo_photo = tk.PhotoImage(file=str(logo_path))
+            raw_logo = tk.PhotoImage(file=str(logo_path))
+            # Header logosu büyük geldiğinde sol paneli aşağı itiyordu.
+            # 720x199 kaynak görseli 360x99 seviyesine indirerek butonları görünür tutuyoruz.
+            self.logo_photo = raw_logo.subsample(2, 2)
             tk.Label(brand, image=self.logo_photo, bg=self.ui_bg).pack(anchor="w")
         except Exception:
             ttk.Label(brand, text="ZELKA LABS", style="ZS.Title.TLabel").pack(anchor="w")
 
         ttk.Label(left, text="Zelka Scribe", style="ZS.Title.TLabel").pack(anchor="w")
-        ttk.Label(left, text="Video to Text Converter", style="ZS.Subtitle.TLabel").pack(anchor="w", pady=(2, 24))
+        ttk.Label(left, text="Video to Text Converter", style="ZS.Subtitle.TLabel").pack(anchor="w", pady=(2, 16))
 
         def section_title(parent, text):
             lbl = ttk.Label(parent, text=text.upper(), style="ZS.Section.TLabel")
@@ -469,7 +481,7 @@ class InstaYaziyaCevirApp(tk.Tk):
 
         def card(parent, pad=12):
             f = tk.Frame(parent, bg=self.card_bg, highlightthickness=1, highlightbackground=self.line, padx=pad, pady=pad)
-            f.pack(fill="x", pady=(0, 14))
+            f.pack(fill="x", pady=(0, 10))
             return f
 
         # Input kartı
@@ -604,7 +616,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.log("Hazır. Video linki gir veya dosya seç.")
         self.log("Not: Aynı oturumda aynı model tekrar yüklenmez; ikinci video daha hızlı başlar.")
         self.log("Not: large-v3 ve turbo ilk kullanımda indirilebilir/yüklenebilir; sayaçtan bekleme süresini takip edebilirsin.")
-        self.log("Not: Zelka Scribe v2.0 marka arayüzü eklendi; transkripsiyon motoru korunur.")
+        self.log("Not: Zelka Scribe v2.0.1 arayüz düzeltmesi eklendi; transkripsiyon motoru korunur.")
         self.log("Not: Sadece iki temiz çıktı üretilir: *.zamanli.txt ve *.duz_metin.txt.")
 
     def on_model_changed(self, _event=None):
