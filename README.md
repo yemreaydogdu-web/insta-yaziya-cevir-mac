@@ -1,82 +1,42 @@
-# Zelka Scribe v2.0.1
+# Zelka Scribe v2.1.0
 
-Zelka Labs çatısı altında hazırlanan macOS ve Windows video/ses yazıya çevirme uygulaması.
+Video linklerinden veya bilgisayardaki video/ses dosyalarından metin çıkaran macOS/Windows uygulaması.
 
-**Product:** Zelka Scribe  
-**Descriptor:** Video to Text Converter
+## v2.1.0 yenilikleri
 
-## v2.0.1 yenilikleri
-
-- Zelka Scribe marka arayüzü eklendi.
-- Program içi yatay logo ve app icon assetleri eklendi.
-- Uygulama adı, DMG adı ve GitHub Actions artifact adları Zelka Scribe olarak güncellendi.
-- Çalışan transkripsiyon motoru korunur:
-  - yerel video/ses dosyası seçme,
-  - YouTube/Instagram ve benzeri linklerden indirme,
-  - Chrome/Safari/Firefox/Edge çerezi seçme,
-  - small / medium / large-v3 / turbo model seçimi,
-  - ilk 1 dakika test modu,
-  - canlı işlem yüzdesi, geçen süre ve tahmini kalan süre,
-  - iptal butonu,
-  - model cache / RAM temizleme.
-- Çıktı sistemi sadeleştirildi: normal kullanımda yalnızca iki temiz dosya üretilir:
+- Sağdaki işlevsiz transcript preview alanı kaldırıldı.
+- Yerine Zelka maskotlu animasyon / işlem durumu paneli eklendi.
+- Sol kontrol paneli daha minimal ve açılır/kapanır hale getirildi.
+- Kırık beyaz, siyah ve editorial Zelka görsel dili güçlendirildi.
+- Çalışan transkripsiyon motoru, yt-dlp indirme, model cache ve çıktı mantığı korunur.
+- Normal kullanıcı için yalnızca iki temiz çıktı üretilir:
   - `*.zamanli.txt`
   - `*.duz_metin.txt`
-- Hızlı düzeltme editörü korunur; şüpheli kelimeler işaretlenir ve önerilerden düzeltilebilir.
+- Şüpheli kelime yoksa düzeltme editörü gereksiz yere açılmaz.
 
 ## Kullanım
 
-1. Video linki yapıştır veya bilgisayardan video/ses dosyası seç.
+1. Video linki gir veya dosya seç.
 2. Model seç:
    - `small`: hızlı günlük kullanım
    - `large-v3`: kalite modu
    - `turbo`: hızlı kalite denemesi
-3. Gerekirse tarayıcı çerezi seç. Instagram linkleri çoğunlukla Chrome/Safari çerezi isteyebilir.
-4. `Convert` butonuna bas.
-5. İşlem bitince editör açılır; gerekirse düzeltmeleri yapıp kaydet.
+3. Gerekirse tarayıcı çerezi olarak Chrome/Safari seç.
+4. `İşlemeyi Başlat` butonuna bas.
+5. Çıktılar seçili klasöre kaydedilir.
 
-## macOS build
+## Build
 
-GitHub Actions otomatik build alır. Elle build için:
+macOS:
 
 ```bash
 bash build_macos.sh
 ```
 
-Çıktılar:
-
-```text
-dist/Zelka Scribe.app
-dist/ZelkaScribe.dmg
-```
-
-
-## Windows build
-
-GitHub Actions üzerinden Windows çıktısı almak için `Actions > Build Windows app > Run workflow` kullan. Elle build için Windows bilgisayarda:
+Windows:
 
 ```powershell
 .\build_windows.ps1
 ```
 
-veya çift tıklayarak:
-
-```text
-build_windows.bat
-```
-
-Çıktı:
-
-```text
-dist\Zelka Scribe\Zelka Scribe.exe
-```
-
-GitHub Actions artifact adı:
-
-```text
-ZelkaScribe-Windows-app
-```
-
-## Not
-
-Bu sürümde amaç çalışan motoru bozmadan ürünü Zelka Scribe kimliğine taşımaktır. Transkripsiyon, indirme ve model ayarlarının temel mantığı v1.7'den korunmuştur.
+GitHub Actions içinde macOS ve Windows workflow dosyaları hazırdır.
