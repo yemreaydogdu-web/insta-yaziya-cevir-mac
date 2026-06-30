@@ -1,20 +1,13 @@
 MAC KULLANIYORSAN HEDEF DOSYA .EXE DEĞİL, .APP / .DMG'DİR.
 
-v1.3 yenilikleri:
-- turbo model seçeneği eklendi.
-- Geçen süre sayacı eklendi.
-- Aşama göstergesi eklendi.
-- Seçili modeli hazırla butonu eklendi.
-- Yüklü model bilgisi eklendi.
-- large-v3 / turbo için ilk kullanım uyarısı eklendi.
+v1.4 ile özel terim alanı kaldırıldı. Link alanı artık genel Video linki mantığında çalışır.
+YouTube/Instagram indirme tarafı ffmpeg gerektirmeyecek şekilde tek dosya / sadece ses indirmeyi dener.
 
-Final uygulamayı üretmenin en kolay yolu:
+GitHub'da build almak için:
+1) Bu klasördeki dosyaları repoya yükle.
+2) Actions > Build macOS app workflow'unu çalıştır.
+3) Artifacts bölümünden InstaYaziyaCevir-macOS-dmg dosyasını indir.
+4) DMG'yi aç, uygulamayı Applications klasörüne sürükle.
 
-1) GitHub'da mevcut repoya gir.
-2) Bu klasördeki dosyaları repoya yükle.
-3) Actions sekmesine gir.
-4) Build macOS app > Run workflow de.
-5) Artifacts bölümünden InstaYaziyaCevir-macOS-dmg dosyasını indir.
-6) DMG'yi aç, uygulamayı Applications klasörüne sürükle.
-
-Uygulama imzasız olduğu için ilk açılışta sağ tık > Aç yapman gerekebilir.
+Instagram linki giriş isterse Chrome/Safari'de Instagram açıkken uygulamada Tarayıcı çerezi seç.
+macOS anahtar zinciri izin/parola sorarsa Mac kullanıcı parolanı girmen gerekir.

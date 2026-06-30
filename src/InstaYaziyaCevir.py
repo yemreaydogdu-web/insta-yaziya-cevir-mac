@@ -20,7 +20,7 @@ from faster_whisper import WhisperModel
 
 
 APP_NAME = "Insta Yazıya Çevir"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "InstaYaziyaCevir"
 
 
@@ -32,7 +32,6 @@ class JobOptions:
     model_size: str
     cookies_browser: str
     language: str
-    context_prompt: str
 
 
 def safe_filename(text: str, fallback: str = "video") -> str:
@@ -203,13 +202,21 @@ def clean_segments(segments: list, total_duration: Optional[float] = None):
     return cleaned, removed
 
 
-def download_instagram(url: str, output_dir: Path, cookies_browser: str, log) -> Path:
+def download_media(url: str, output_dir: Path, cookies_browser: str, log) -> Path:
+    """Video linkinden ffmpeg gerektirmeden sesli tek dosya indirir.
+
+    Önce audio-only format dener. Yoksa tek parça, sesi olan en iyi formatı indirir.
+    Bilerek video+audio merge istemeyiz; çünkü merge ffmpeg gerektirir.
+    Transkripsiyon için görüntüye değil, sese ihtiyacımız var.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
+    downloads_dir = output_dir / "downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
 
     ydl_opts = {
-        "outtmpl": str(output_dir / "downloads" / "%(title).80s-%(id)s.%(ext)s"),
-        "format": "bv*+ba/best/bestvideo+bestaudio",
-        "merge_output_format": "mp4",
+        "outtmpl": str(downloads_dir / "%(title).80s-%(id)s.%(ext)s"),
+        # Tek dosya seç: ffmpeg merge gerektiren bv+ba formatlarından kaçın.
+        "format": "bestaudio/best[acodec!=none]/best",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": False,
@@ -218,32 +225,49 @@ def download_instagram(url: str, output_dir: Path, cookies_browser: str, log) ->
 
     if cookies_browser and cookies_browser != "Yok":
         ydl_opts["cookiesfrombrowser"] = (cookies_browser.lower(),)
-        log(f"Instagram erişimi için {cookies_browser} çerezleri deneniyor...")
+        log(f"{cookies_browser} çerezleri deneniyor. macOS parola/anahtar zinciri izni isteyebilir.")
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        log("Instagram linki indiriliyor...")
-        info = ydl.extract_info(url, download=True)
-        path = Path(ydl.prepare_filename(info))
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            log("Video/ses linki indiriliyor...")
+            info = ydl.extract_info(url, download=True)
+            path = Path(ydl.prepare_filename(info))
 
-        requested = info.get("requested_downloads") or []
-        if requested and requested[0].get("filepath"):
-            path = Path(requested[0]["filepath"])
+            requested = info.get("requested_downloads") or []
+            if requested:
+                for item in requested:
+                    fp = item.get("filepath") or item.get("filename")
+                    if fp and Path(fp).exists():
+                        path = Path(fp)
+                        break
+    except yt_dlp.utils.DownloadError as exc:
+        msg = str(exc)
+        if "empty media response" in msg.lower() or "cookies" in msg.lower():
+            raise RuntimeError(
+                "Link indirilemedi. Bu içerik giriş/çerez istiyor olabilir. "
+                "Tarayıcıda içeriği açıp giriş yaptığından emin ol; uygulamada Tarayıcı çerezi olarak Chrome/Safari seç."
+            ) from exc
+        if "ffmpeg" in msg.lower():
+            raise RuntimeError(
+                "Link indirilemedi çünkü indirme aracı ffmpeg isteyen bir format seçti. "
+                "Bu v1.4'te tek dosya/ses indirme ile azaltıldı; farklı bir link deneyebilir veya videoyu dosya olarak indirebilirsin."
+            ) from exc
+        raise
 
     if not path.exists():
-        candidates = sorted((output_dir / "downloads").glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
+        candidates = sorted(downloads_dir.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not candidates:
-            raise FileNotFoundError("İndirilen video dosyası bulunamadı.")
+            raise FileNotFoundError("İndirilen medya dosyası bulunamadı.")
         path = candidates[0]
 
     return path
-
 
 class InstaYaziyaCevirApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"{APP_NAME} v{APP_VERSION}")
-        self.geometry("950x830")
-        self.minsize(800, 720)
+        self.geometry("950x760")
+        self.minsize(800, 660)
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.worker: Optional[threading.Thread] = None
         self.preload_worker: Optional[threading.Thread] = None
@@ -257,7 +281,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         self.stage_var = tk.StringVar(value="Aşama: Hazır")
         self.elapsed_var = tk.StringVar(value="Geçen süre: 00:00")
         self.loaded_model_var = tk.StringVar(value="Yüklü model: Yok")
-        self.model_hint_var = tk.StringVar(value="Small: hızlı taslak. Large-v3: kalite modu. Turbo: deneysel hızlı kalite. v1.3 güvenli bitiş filtresi açık.")
+        self.model_hint_var = tk.StringVar(value="Small: hızlı taslak. Large-v3: kalite modu. Turbo: deneysel hızlı kalite. v1.4 link indirme ffmpeg gerektirmez.")
         self.cached_model: Optional[WhisperModel] = None
         self.cached_model_size: Optional[str] = None
         self.activity_start_time: Optional[float] = None
@@ -271,20 +295,20 @@ class InstaYaziyaCevirApp(tk.Tk):
         root = ttk.Frame(self, padding=pad)
         root.pack(fill="both", expand=True)
 
-        title = ttk.Label(root, text="Instagram videosunu yazıya çevir", font=("Arial", 20, "bold"))
+        title = ttk.Label(root, text="Videoyu yazıya çevir", font=("Arial", 20, "bold"))
         title.pack(anchor="w")
 
         desc = ttk.Label(
             root,
             text=(
-                "Instagram linki yapıştır veya bilgisayardan video/ses dosyası seç. "
-                "v1.3: güvenli bitiş filtresi, hallucination azaltma ayarları, turbo/large-v3 test modu ve sayaç eklendi."
+                "Video linki yapıştır veya bilgisayardan video/ses dosyası seç. "
+                "v1.4: özel terim alanı kaldırıldı, linkten indirirken ffmpeg gerektirmeyen tek dosya/ses modu eklendi."
             ),
             wraplength=900,
         )
         desc.pack(anchor="w", pady=(4, 16))
 
-        url_frame = ttk.LabelFrame(root, text="1) Instagram linki")
+        url_frame = ttk.LabelFrame(root, text="1) Video linki")
         url_frame.pack(fill="x", pady=(0, 10))
         ttk.Entry(url_frame, textvariable=self.url_var).pack(side="left", fill="x", expand=True, padx=10, pady=10)
         ttk.Button(url_frame, text="Temizle", command=lambda: self.url_var.set("")).pack(side="left", padx=(0, 10))
@@ -292,18 +316,8 @@ class InstaYaziyaCevirApp(tk.Tk):
         file_frame = ttk.LabelFrame(root, text="Alternatif: Bilgisayardan dosya seç")
         file_frame.pack(fill="x", pady=(0, 10))
         ttk.Entry(file_frame, textvariable=self.selected_file).pack(side="left", fill="x", expand=True, padx=10, pady=10)
-        ttk.Button(file_frame, text="Dosya seç", command=self.choose_file).pack(side="left", padx=(0, 10))
-
-        context_frame = ttk.LabelFrame(root, text="Opsiyonel: Video konusu / özel terimler")
-        context_frame.pack(fill="x", pady=(0, 10))
-        context_help = ttk.Label(
-            context_frame,
-            text="Örnek: retainer, şeffaf plak, braket / Gemini, Kling, prompt / TÜİK, faiz, enflasyon",
-            wraplength=900,
-        )
-        context_help.pack(anchor="w", padx=10, pady=(8, 0))
-        self.context_text = tk.Text(context_frame, wrap="word", height=3)
-        self.context_text.pack(fill="x", padx=10, pady=8)
+        ttk.Button(file_frame, text="Dosya seç", command=self.choose_file).pack(side="left", padx=(0, 8))
+        ttk.Button(file_frame, text="Temizle", command=lambda: self.selected_file.set("")).pack(side="left", padx=(0, 10))
 
         options = ttk.LabelFrame(root, text="2) Ayarlar")
         options.pack(fill="x", pady=(0, 10))
@@ -332,7 +346,7 @@ class InstaYaziyaCevirApp(tk.Tk):
         )
         lang_box.grid(row=0, column=3, padx=(8, 24), sticky="w")
 
-        ttk.Label(row, text="Instagram çerezi:").grid(row=0, column=4, sticky="w")
+        ttk.Label(row, text="Tarayıcı çerezi:").grid(row=0, column=4, sticky="w")
         cookies_box = ttk.Combobox(
             row,
             textvariable=self.cookies_var,
@@ -379,17 +393,17 @@ class InstaYaziyaCevirApp(tk.Tk):
         scroll.pack(side="right", fill="y", padx=(0, 10), pady=10)
         self.log_text.configure(yscrollcommand=scroll.set)
 
-        self.log("Hazır. Instagram linki gir veya dosya seç.")
+        self.log("Hazır. Video linki gir veya dosya seç.")
         self.log("Not: Aynı oturumda aynı model tekrar yüklenmez; ikinci video daha hızlı başlar.")
         self.log("Not: large-v3 ve turbo ilk kullanımda indirilebilir/yüklenebilir; sayaçtan bekleme süresini takip edebilirsin.")
-        self.log("Not: v1.3 güvenli bitiş filtresi, sahte altyazı/jenerik kapanışlarını ana çıktıdan temizler.")
+        self.log("Not: v1.4 linkten indirirken ffmpeg merge istemez; YouTube/Instagram linklerini tek dosya/ses olarak dener.")
 
     def on_model_changed(self, _event=None):
         model = self.model_var.get()
         if model == "large-v3":
             self.model_hint_var.set("Large-v3 ana kalite modudur. İlk kullanımda uzun sürebilir; ikinci kullanımda cache sayesinde hızlı başlar.")
         elif model == "turbo":
-            self.model_hint_var.set("Turbo deneysel hızlı kalite modudur. Kalite large-v3 kadar stabil olmayabilir; v1.3 güvenli bitiş filtresi açıktır.")
+            self.model_hint_var.set("Turbo deneysel hızlı kalite modudur. Kalite large-v3 kadar stabil olmayabilir; v1.4 güvenli bitiş filtresi açıktır.")
         elif model == "medium":
             self.model_hint_var.set("Medium dengeli moddur ama testte large-v3 kadar iyi çıkmayabilir.")
         elif model == "small":
@@ -497,11 +511,14 @@ class InstaYaziyaCevirApp(tk.Tk):
             model_size=self.model_var.get(),
             cookies_browser=self.cookies_var.get(),
             language=self.language_var.get(),
-            context_prompt=self.context_text.get("1.0", "end").strip(),
         )
 
         if not opts.instagram_url and not opts.local_file:
-            messagebox.showwarning(APP_NAME, "Instagram linki gir veya dosya seç.")
+            messagebox.showwarning(APP_NAME, "Video linki gir veya dosya seç.")
+            return
+
+        if opts.instagram_url and opts.local_file:
+            messagebox.showwarning(APP_NAME, "Hem link hem dosya seçili. Lütfen birini temizle ve tekrar dene.")
             return
 
         self.set_buttons_busy(True)
@@ -565,8 +582,8 @@ class InstaYaziyaCevirApp(tk.Tk):
                 media_path = Path(opts.local_file)
                 self.log(f"Dosya seçildi: {media_path}")
             else:
-                self.set_stage("Instagram linki indiriliyor")
-                media_path = download_instagram(opts.instagram_url, opts.output_dir, opts.cookies_browser, self.log)
+                self.set_stage("Video linki indiriliyor")
+                media_path = download_media(opts.instagram_url, opts.output_dir, opts.cookies_browser, self.log)
                 self.log(f"İndirildi: {media_path}")
 
             if not media_path.exists():
@@ -583,9 +600,7 @@ class InstaYaziyaCevirApp(tk.Tk):
             model = self.get_model(opts.model_size)
 
             language = None if opts.language == "auto" else opts.language
-            initial_prompt = build_initial_prompt(opts.context_prompt, opts.language)
-            if initial_prompt:
-                self.log("Konu/özel terim bağlamı kullanılacak.")
+            initial_prompt = None
 
             self.set_stage("Yazıya çeviriliyor")
             self.log("Yazıya çevirme başladı...")
